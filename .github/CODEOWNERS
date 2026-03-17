@@ -1,0 +1,16 @@
+# Code Owners for Fabric GitHub Integration
+# ==========================================
+# These owners are automatically requested for review on PRs.
+
+# Default owners for everything
+* @sautalwar
+
+# Migration files require data engineering review
+/lakehouse-migrations/ @sautalwar
+
+# Pipeline/workflow changes require DevOps review
+/.github/workflows/ @sautalwar
+/pipelines/ @sautalwar
+
+# Notebooks require data team review
+/notebooks/ @sautalwar

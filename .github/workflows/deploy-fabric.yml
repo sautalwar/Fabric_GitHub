@@ -1,0 +1,212 @@
+# ============================================================================
+# Deploy Fabric Lakehouse Schema Migrations
+# ============================================================================
+# This workflow demonstrates end-to-end CI/CD for Microsoft Fabric:
+#   1. Validates migration files on every push
+#   2. Authenticates via OIDC (zero stored secrets)
+#   3. Deploys to UAT via Fabric REST API
+#   4. Requires manual approval for Production
+#
+# Prerequisites:
+#   - Entra ID app registration with OIDC federated credential for this repo
+#   - Service principal has Contributor role on Fabric Capacity
+#   - Fabric Admin: "Service principals can use Fabric APIs" enabled
+#   - SP added as Contributor to Dev, UAT, and Prod workspaces
+#   - GitHub Environments "uat" and "production" configured with protection rules
+# ============================================================================
+
+name: Deploy Fabric
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lakehouse-migrations/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lakehouse-migrations/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options:
+          - uat
+          - production
+
+env:
+  FABRIC_API_BASE: https://api.fabric.microsoft.com/v1
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
+  id-token: write      # Required for OIDC authentication
+  pull-requests: write  # Required for PR comments
+
+jobs:
+  # ──────────────────────────────────────────────
+  # JOB 1: Validate migration files
+  # ──────────────────────────────────────────────
+  validate:
+    name: "✅ Validate Migrations"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: 🔍 Detect changed migration files
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- lakehouse-migrations/)
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            FILES=$(find lakehouse-migrations/migrations -name '*.sql' -o -name '*.py' | sort)
+          else
+            FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- lakehouse-migrations/)
+          fi
+          echo "Changed files:"
+          echo "$FILES"
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: ✅ Validate migration syntax & ordering
+        run: |
+          python scripts/validate_migrations.py
+        env:
+          CHANGED_FILES: ${{ steps.changes.outputs.files }}
+
+      - name: 💬 Comment on PR with validation results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Migration Validation Passed**\n\nAll migration files are valid:\n- SQL syntax: ✅\n- Version ordering: ✅\n- Naming convention: ✅\n- No duplicate versions: ✅'
+            })
+
+  # ──────────────────────────────────────────────
+  # JOB 2: Deploy to UAT
+  # ──────────────────────────────────────────────
+  deploy-uat:
+    name: "🚀 Deploy to UAT"
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: uat
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🔐 Authenticate via OIDC (Zero Secrets)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: 🏗️ Trigger migration notebook in UAT
+        run: |
+          python scripts/trigger_notebook.py \
+            --env uat \
+            --workspace-id ${{ secrets.UAT_WORKSPACE_ID }} \
+            --notebook-name "migration_runner"
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: 📊 Verify migration results
+        run: |
+          python scripts/verify_deployment.py \
+            --env uat \
+            --workspace-id ${{ secrets.UAT_WORKSPACE_ID }}
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+  # ──────────────────────────────────────────────
+  # JOB 3: Deploy to Production (requires approval)
+  # ──────────────────────────────────────────────
+  deploy-prod:
+    name: "🏭 Deploy to Production"
+    needs: deploy-uat
+    runs-on: ubuntu-latest
+    environment: production   # ← Approval gate configured here
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🔐 Authenticate via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: 🏗️ Trigger migration notebook in Production
+        run: |
+          python scripts/trigger_notebook.py \
+            --env prod \
+            --workspace-id ${{ secrets.PROD_WORKSPACE_ID }} \
+            --notebook-name "migration_runner"
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: 📊 Verify production deployment
+        run: |
+          python scripts/verify_deployment.py \
+            --env prod \
+            --workspace-id ${{ secrets.PROD_WORKSPACE_ID }}
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: 📝 Create deployment summary
+        run: |
+          echo "## 🏭 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Notebook:** migration_runner" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY

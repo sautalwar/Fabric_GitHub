@@ -1,0 +1,12 @@
+# Fabric CI/CD Dependencies
+# ==========================
+# Used by GitHub Actions workflows and local development
+
+# Azure authentication (supports OIDC, Service Principal, CLI)
+azure-identity>=1.15.0
+
+# HTTP client for Fabric REST API calls
+requests>=2.31.0
+
+# Fabric CI/CD toolkit (optional — Microsoft's official tool)
+# fabric-cicd>=0.1.0
