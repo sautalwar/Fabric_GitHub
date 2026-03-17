@@ -457,7 +457,7 @@ body.notes-on .slides{scroll-snap-type:none}
   <div class="slide-inner" style="text-align:center">
     <div class="animate-in">
       <div class="customer-badge" style="margin-bottom:24px">
-        <span>📍</span> Prepared for Digital Realty
+        <span>📍</span> Enterprise Integration Guide
       </div>
     </div>
     <h1 class="animate-in delay-1" style="font-size:56px;max-width:900px;margin:0 auto 16px">
@@ -536,7 +536,7 @@ body.notes-on .slides{scroll-snap-type:none}
         <p>3. <strong>CI/CD Native:</strong> "GitHub Actions runs validation, testing, and deployment automatically. Push a change, watch it deploy. No manual clicks."</p>
         <p>4. <strong>AI Pair Programming:</strong> "Copilot understands your repo conventions and generates migration scripts, YAML pipelines, and API helpers that match your team's patterns."</p>
         <p><strong>Microsoft value to emphasize:</strong> "Unlike competing platforms that require bolting on third-party version control, Fabric has native Git integration built in — included in every capacity at no extra cost."</p>
-        <p><strong>If asked 'Why not Azure DevOps?':</strong> "Both work. The scripts and patterns are CI-platform agnostic. We're showing GitHub today because Digital Realty is standardizing on it, but the same repo works in Azure DevOps."</p>
+        <p><strong>If asked 'Why not Azure DevOps?':</strong> "Both work. The scripts and patterns are CI-platform agnostic. We're showing GitHub today because your team is standardizing on it, but the same repo works in Azure DevOps."</p>
       </div>
     </div>
   </div>
@@ -838,7 +838,7 @@ body.notes-on .slides{scroll-snap-type:none}
               <div style="padding:14px;font-size:12px;color:var(--text-muted);line-height:1.8">
                 <strong style="color:var(--text)">After sync, your repo shows:</strong><br>
                 <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-top:8px;font-family:'Cascadia Code',monospace;font-size:11px;line-height:1.8">
-                  <span style="color:#8b949e">📁</span> <span style="color:var(--ms-blue-light)">DigitalRealty-Dev/</span><br>
+                  <span style="color:#8b949e">📁</span> <span style="color:var(--ms-blue-light)">Workspace-Dev/</span><br>
                   <span style="color:#8b949e">&nbsp;&nbsp;📁</span> DataCenterLakehouse.Lakehouse/<br>
                   <span style="color:#8b949e">&nbsp;&nbsp;📁</span> migration_runner.Notebook/<br>
                   <span style="color:#8b949e">&nbsp;&nbsp;&nbsp;&nbsp;📄</span> notebook-content.py<br>
@@ -1080,7 +1080,7 @@ body.notes-on .slides{scroll-snap-type:none}
         <p><strong>Opening:</strong> "Everything we just showed about Git integration is real and works beautifully. But there is one critical exception that affects every team using Lakehouse."</p>
         <p><strong>The key distinction:</strong> Explain that Git sees the Lakehouse container — the shell, the name, the GUID — but never the SQL inside it. When a developer types CREATE TABLE in the Dev Lakehouse, Git does not receive that statement.</p>
         <p><strong>Real-world impact story:</strong> "Imagine your team spends 60 days building 30 tables in Dev. On release day, they deploy to UAT. Every notebook arrives. Every pipeline arrives. But the tables? Zero. They have to manually recreate 30 tables. Then do it again for Prod. At month 3, someone adds a column in Dev but forgets to add it in Prod — production breaks at 2 AM."</p>
-        <p><strong>Why this matters for Digital Realty:</strong> "This is the exact scenario your team has experienced. The deployment pipeline looks healthy, but the Lakehouse table structure stays behind."</p>
+        <p><strong>Why this matters for your team:</strong> "This is the exact scenario your team has experienced. The deployment pipeline looks healthy, but the Lakehouse table structure stays behind."</p>
         <p><strong>Key comparison:</strong> Emphasize that Warehouse does NOT have this gap — Warehouse exports full DDL as a SQL Project. That is why we recommend Warehouse for Gold-layer BI objects.</p>
         <p><strong>Do NOT say:</strong> Do not criticize Fabric. Frame it as: "Fabric is outstanding — this is a specific serialization gap that has a proven solution."</p>
         <p><strong>Transition:</strong> "So how do we close this gap? The next slide shows you."</p>
@@ -2444,7 +2444,7 @@ body.notes-on .slides{scroll-snap-type:none}
       <div class="notes-content">
         <h4>Presenter Notes — Closing</h4>
         <p><strong>Recap the 3 pillars:</strong> "Version Everything — Git is the source of truth for artifacts and schema. Automate Everything — GitHub Actions deploys with zero manual steps. Copilot Everything — AI accelerates every part of the workflow."</p>
-        <p><strong>Next steps — be specific:</strong> Walk through the 5 items. For Digital Realty: (1) We'll connect the Dev workspace this week. (2) Branch protection rules go on main. (3) The GitHub Actions workflow is already in this repo. (4) Copilot licenses can be added to the team. (5) All schema changes go through PRs starting now.</p>
+        <p><strong>Next steps — be specific:</strong> Walk through the 5 items: (1) Connect the Dev workspace this week. (2) Branch protection rules go on main. (3) The GitHub Actions workflow is already in this repo. (4) Copilot licenses can be added to the team. (5) All schema changes go through PRs starting now.</p>
         <p><strong>Microsoft value (closing statement):</strong> "Microsoft is the only vendor that provides the analytics platform (Fabric), the version control (GitHub), the CI/CD engine (Actions), the AI assistant (Copilot), the identity platform (Entra ID), and the cloud infrastructure (Azure) — all from one company, all integrated, all under one enterprise agreement."</p>
         <p><strong>Transition to Q&amp;A:</strong> "Happy to go deeper on any topic — governance, the APIs, the migration runner, Copilot demos, or the Warehouse vs Lakehouse decision. What questions do you have?"</p>
         <p><strong>Keep these tabs ready for Q&amp;A:</strong> Fabric portal, GitHub repo, GitHub Actions, Fabric REST API docs, and VS Code with Copilot Chat.</p>
@@ -2456,7 +2456,7 @@ body.notes-on .slides{scroll-snap-type:none}
 </div><!-- /slides -->
 
 <footer>
-  <p>Microsoft Fabric + GitHub Integration — Prepared for Digital Realty</p>
+  <p>Microsoft Fabric + GitHub Integration — Enterprise Guide</p>
   <p style="margin-top:4px">
     <a href="https://learn.microsoft.com/en-us/fabric/" target="_blank">Microsoft Fabric Documentation</a>
     <span style="margin:0 8px;color:var(--border)">•</span>
