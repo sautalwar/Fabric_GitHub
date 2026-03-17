@@ -1,0 +1,1930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Microsoft Fabric CI/CD — Schema Evolution Solution</title>
+<style>
+/* ═══ RESET & BASE ═══ */
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:16px}
+body{font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;background:#0a0a1a;color:#e8ecf1;overflow-x:hidden}
+
+/* ═══ CSS VARIABLES ═══ */
+:root{
+  --ms-blue:#0078d4;--ms-blue-light:#2899f5;--ms-blue-dark:#004578;
+  --ms-purple:#8661c5;--ms-green:#107c10;--ms-green-light:#54b054;
+  --ms-orange:#ff8c00;--ms-red:#e81123;
+  --bg-dark:#0a0a1a;--bg-card:#12132a;--bg-card2:#1a1b3a;
+  --border:#2a2b4a;--text:#e8ecf1;--text-muted:#8892a4;
+  --gradient-1:linear-gradient(135deg,#0078d4,#8661c5);
+  --gradient-2:linear-gradient(135deg,#107c10,#0078d4);
+  --gradient-3:linear-gradient(135deg,#ff8c00,#e81123);
+  --slide-height:100vh;
+}
+
+/* ═══ NAVIGATION ═══ */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(10,10,26,.92);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);padding:0 40px;height:60px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+nav .brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:15px}
+nav .brand img{height:28px}
+nav .brand .sep{color:var(--text-muted);font-weight:300}
+nav .nav-links{display:flex;gap:6px}
+nav .nav-links a{
+  color:var(--text-muted);text-decoration:none;padding:6px 14px;
+  border-radius:6px;font-size:13px;font-weight:500;transition:all .2s;
+}
+nav .nav-links a:hover,nav .nav-links a.active{color:#fff;background:rgba(255,255,255,.08)}
+nav .nav-controls{display:flex;gap:10px;align-items:center}
+nav .slide-counter{
+  font-family:'Cascadia Code',monospace;font-size:13px;
+  color:var(--ms-blue-light);background:rgba(0,120,212,.15);
+  padding:4px 12px;border-radius:20px;
+}
+nav button{
+  background:rgba(255,255,255,.06);border:1px solid var(--border);
+  color:var(--text);padding:6px 16px;border-radius:6px;cursor:pointer;
+  font-size:13px;transition:all .15s;
+}
+nav button:hover{background:rgba(255,255,255,.12)}
+
+/* ═══ SLIDE CONTAINER ═══ */
+.slides{scroll-snap-type:y mandatory}
+.slide{
+  min-height:var(--slide-height);scroll-snap-align:start;
+  display:flex;align-items:center;justify-content:center;
+  padding:80px 60px 40px;position:relative;overflow:hidden;
+}
+
+/* ═══ SLIDE BACKGROUNDS ═══ */
+.slide::before{
+  content:'';position:absolute;inset:0;opacity:.06;
+  background:radial-gradient(ellipse at 30% 50%,var(--ms-blue),transparent 60%),
+             radial-gradient(ellipse at 70% 80%,var(--ms-purple),transparent 50%);
+}
+.slide:nth-child(odd)::before{
+  background:radial-gradient(ellipse at 70% 30%,var(--ms-purple),transparent 60%),
+             radial-gradient(ellipse at 20% 70%,var(--ms-blue),transparent 50%);
+}
+
+.slide-inner{max-width:1200px;width:100%;position:relative;z-index:1}
+
+/* ═══ TYPOGRAPHY ═══ */
+.slide-label{
+  font-size:12px;text-transform:uppercase;letter-spacing:3px;
+  color:var(--ms-blue-light);font-weight:700;margin-bottom:12px;
+}
+h1{font-size:52px;font-weight:800;line-height:1.1;margin-bottom:16px;
+   background:var(--gradient-1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+   background-clip:text;
+}
+h2{font-size:40px;font-weight:700;line-height:1.15;margin-bottom:16px}
+h3{font-size:24px;font-weight:600;margin-bottom:12px}
+.subtitle{font-size:20px;color:var(--text-muted);line-height:1.5;max-width:700px;margin-bottom:32px}
+.small-text{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* ═══ GRID LAYOUTS ═══ */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+.grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:20px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+
+/* ═══ CARDS ═══ */
+.card{
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:16px;padding:28px;transition:all .25s;
+}
+.card:hover{border-color:var(--ms-blue);transform:translateY(-2px);
+  box-shadow:0 8px 30px rgba(0,120,212,.15);
+}
+.card .card-icon{
+  width:48px;height:48px;border-radius:12px;display:flex;
+  align-items:center;justify-content:center;font-size:22px;
+  margin-bottom:16px;background:rgba(0,120,212,.12);
+}
+.card h3{font-size:18px;margin-bottom:8px}
+.card p{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* ═══ BADGES ═══ */
+.badge{
+  display:inline-block;padding:3px 10px;border-radius:20px;
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+}
+.badge-green{background:rgba(16,124,16,.2);color:var(--ms-green-light);border:1px solid rgba(16,124,16,.3)}
+.badge-red{background:rgba(232,17,35,.15);color:#ff6b6b;border:1px solid rgba(232,17,35,.3)}
+.badge-blue{background:rgba(0,120,212,.15);color:var(--ms-blue-light);border:1px solid rgba(0,120,212,.3)}
+.badge-orange{background:rgba(255,140,0,.15);color:var(--ms-orange);border:1px solid rgba(255,140,0,.3)}
+
+/* ═══ TRACKING TABLE ═══ */
+.track-table{width:100%;border-collapse:separate;border-spacing:0;border-radius:12px;overflow:hidden}
+.track-table th{
+  background:var(--bg-card2);padding:14px 20px;text-align:left;
+  font-size:13px;text-transform:uppercase;letter-spacing:1px;
+  color:var(--text-muted);border-bottom:1px solid var(--border);
+}
+.track-table td{
+  padding:12px 20px;border-bottom:1px solid rgba(42,43,74,.5);
+  font-size:14px;vertical-align:middle;
+}
+.track-table tr:last-child td{border-bottom:none}
+.track-table .status-yes{color:var(--ms-green-light);font-weight:600}
+.track-table .status-no{color:#ff6b6b;font-weight:600}
+
+/* ═══ PIPELINE DIAGRAM ═══ */
+.pipeline{
+  display:flex;align-items:center;justify-content:center;gap:0;
+  margin:32px 0;flex-wrap:wrap;
+}
+.pipeline-stage{
+  background:var(--bg-card);border:2px solid var(--border);
+  border-radius:16px;padding:24px 32px;text-align:center;min-width:200px;
+  position:relative;transition:all .3s;
+}
+.pipeline-stage:hover{border-color:var(--ms-blue);transform:scale(1.03)}
+.pipeline-stage.dev{border-color:var(--ms-blue)}
+.pipeline-stage.uat{border-color:var(--ms-orange)}
+.pipeline-stage.prod{border-color:var(--ms-green)}
+.pipeline-stage .stage-label{
+  font-size:11px;text-transform:uppercase;letter-spacing:2px;
+  margin-bottom:6px;font-weight:700;
+}
+.pipeline-stage.dev .stage-label{color:var(--ms-blue-light)}
+.pipeline-stage.uat .stage-label{color:var(--ms-orange)}
+.pipeline-stage.prod .stage-label{color:var(--ms-green-light)}
+.pipeline-stage .stage-name{font-size:16px;font-weight:600}
+.pipeline-stage .stage-items{font-size:12px;color:var(--text-muted);margin-top:8px}
+.pipeline-arrow{
+  font-size:28px;color:var(--text-muted);padding:0 16px;
+  display:flex;align-items:center;
+}
+
+/* ═══ FLOW / ARCHITECTURE DIAGRAM ═══ */
+.flow{display:flex;flex-direction:column;gap:20px;align-items:center;margin:24px 0}
+.flow-row{display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:center}
+.flow-box{
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:12px;padding:16px 24px;font-size:14px;font-weight:500;
+  display:flex;align-items:center;gap:10px;transition:all .2s;
+}
+.flow-box:hover{border-color:var(--ms-blue)}
+.flow-box .icon{font-size:20px}
+.flow-arrow-down{font-size:24px;color:var(--text-muted)}
+
+/* ═══ CODE BLOCKS ═══ */
+.code-block{
+  background:#0d0e1f;border:1px solid var(--border);border-radius:12px;
+  padding:20px 24px;font-family:'Cascadia Code','Fira Code',monospace;
+  font-size:13px;line-height:1.7;overflow-x:auto;position:relative;
+}
+.code-block .lang{
+  position:absolute;top:10px;right:14px;font-size:10px;
+  text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);
+  background:var(--bg-card);padding:2px 8px;border-radius:4px;
+}
+.code-block .comment{color:#6a737d}
+.code-block .keyword{color:#ff7b72}
+.code-block .string{color:#a5d6ff}
+.code-block .function{color:#d2a8ff}
+.code-block .type{color:#79c0ff}
+
+/* ═══ COMPARISON ═══ */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:0;border-radius:16px;overflow:hidden;border:1px solid var(--border)}
+.compare-side{padding:32px;background:var(--bg-card)}
+.compare-side:first-child{border-right:1px solid var(--border)}
+.compare-side h3{margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.compare-side ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+.compare-side li{font-size:14px;display:flex;align-items:flex-start;gap:8px;line-height:1.5}
+.compare-side li::before{font-size:16px;flex-shrink:0;margin-top:1px}
+.compare-green li::before{content:'✅'}
+.compare-red li::before{content:'❌'}
+
+/* ═══ STEP NUMBERS ═══ */
+.steps-list{display:flex;flex-direction:column;gap:20px;margin:24px 0}
+.step-item{display:flex;gap:20px;align-items:flex-start}
+.step-num{
+  width:40px;height:40px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:16px;background:var(--gradient-1);color:#fff;
+}
+.step-content h4{font-size:16px;margin-bottom:4px}
+.step-content p{font-size:14px;color:var(--text-muted);line-height:1.6}
+
+/* ═══ HIGHLIGHT BOX ═══ */
+.highlight-box{
+  background:linear-gradient(135deg,rgba(0,120,212,.08),rgba(134,97,197,.08));
+  border:1px solid rgba(0,120,212,.25);border-radius:16px;
+  padding:32px;margin:24px 0;
+}
+.highlight-box.warning{
+  background:linear-gradient(135deg,rgba(255,140,0,.08),rgba(232,17,35,.08));
+  border-color:rgba(255,140,0,.25);
+}
+.highlight-box.success{
+  background:linear-gradient(135deg,rgba(16,124,16,.08),rgba(0,120,212,.08));
+  border-color:rgba(16,124,16,.25);
+}
+
+/* ═══ ANIMATED DOTS ═══ */
+.dot-pattern{
+  position:absolute;inset:0;opacity:.03;
+  background-image:radial-gradient(circle,#fff 1px,transparent 1px);
+  background-size:30px 30px;
+}
+
+/* ═══ LOGO ═══ */
+.ms-logo{display:flex;gap:2px;margin-right:8px}
+.ms-logo div{width:11px;height:11px}
+.ms-logo .r{background:#f25022}.ms-logo .g{background:#7fba00}
+.ms-logo .b{background:#00a4ef}.ms-logo .y{background:#ffb900}
+.ms-logo-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px}
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.animate-in{animation:fadeUp .6s ease-out both}
+.delay-1{animation-delay:.1s}.delay-2{animation-delay:.2s}
+.delay-3{animation-delay:.3s}.delay-4{animation-delay:.4s}
+
+/* ═══ SCROLL REVEAL ═══ */
+.reveal{opacity:0;transform:translateY(30px);transition:all .6s ease-out}
+.reveal.visible{opacity:1;transform:none}
+
+/* ═══ SECTION DIVIDER ═══ */
+.divider{
+  height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);
+  margin:0 auto;max-width:600px;
+}
+
+/* ═══ CUSTOMER LOGO AREA ═══ */
+.customer-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.05);border:1px solid var(--border);
+  border-radius:8px;padding:6px 16px;font-size:13px;color:var(--text-muted);
+}
+
+/* ═══ FOOTER ═══ */
+footer{
+  text-align:center;padding:40px;color:var(--text-muted);
+  font-size:13px;border-top:1px solid var(--border);
+}
+footer a{color:var(--ms-blue-light);text-decoration:none}
+
+/* ═══ KEY FACTS STRIP ═══ */
+.facts-strip{
+  display:flex;justify-content:center;gap:40px;padding:20px 0;flex-wrap:wrap;
+}
+.fact{text-align:center}
+.fact .fact-num{font-size:36px;font-weight:800;background:var(--gradient-1);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.fact .fact-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+
+/* ═══ TIMELINE ═══ */
+.timeline{position:relative;padding-left:40px;margin:24px 0}
+.timeline::before{
+  content:'';position:absolute;left:15px;top:0;bottom:0;
+  width:2px;background:linear-gradient(180deg,var(--ms-blue),var(--ms-purple),var(--ms-green));
+}
+.timeline-item{position:relative;margin-bottom:28px;padding-left:24px}
+.timeline-item::before{
+  content:'';position:absolute;left:-29px;top:6px;
+  width:12px;height:12px;border-radius:50%;background:var(--ms-blue);
+  border:3px solid var(--bg-dark);
+}
+.timeline-item h4{font-size:15px;margin-bottom:4px}
+.timeline-item p{font-size:13px;color:var(--text-muted);line-height:1.5}
+
+/* ═══ PRESENTER NOTES (collapsible) ═══ */
+.notes-section{margin-top:32px}
+.notes-toggle{
+  display:flex;align-items:center;gap:8px;cursor:pointer;
+  background:rgba(255,255,255,.04);border:1px solid var(--border);
+  border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;
+  color:var(--text-muted);transition:all .25s;user-select:none;width:100%;
+}
+.notes-toggle:hover{background:rgba(255,255,255,.08);color:var(--text);border-color:var(--ms-blue)}
+.notes-toggle .chevron{transition:transform .3s;font-size:12px}
+.notes-toggle.open .chevron{transform:rotate(90deg)}
+.notes-body{
+  max-height:0;overflow:hidden;transition:max-height .5s ease, padding .3s ease;
+  background:rgba(0,0,0,.25);border:1px solid var(--border);border-top:none;
+  border-radius:0 0 10px 10px;padding:0 24px;
+}
+.notes-body.open{max-height:4000px;padding:24px}
+.notes-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:900px){.notes-grid{grid-template-columns:1fr}}
+.note-card{
+  background:rgba(255,255,255,.03);border:1px solid var(--border);
+  border-radius:12px;padding:20px;position:relative;
+}
+.note-card h4{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.note-card .note-step{
+  display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;
+  font-size:13px;line-height:1.6;color:var(--text-muted);
+}
+.note-card .note-step:last-child{margin-bottom:0}
+.note-card .step-marker{
+  flex-shrink:0;width:22px;height:22px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#fff;margin-top:1px;
+}
+.note-card .note-say{
+  font-style:italic;color:var(--ms-blue-light);margin-top:6px;
+  border-left:2px solid var(--ms-blue);padding-left:10px;font-size:12px;
+}
+
+/* ═══ PRINT ═══ */
+@media print{
+  nav{display:none}
+  .slide{min-height:auto;page-break-after:always;padding:40px}
+  body{background:#fff;color:#222}
+  .card{border-color:#ddd}
+  .notes-body{max-height:none!important;padding:24px!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ NAVIGATION ═══ -->
+<nav id="topNav">
+  <div class="brand">
+    <div class="ms-logo"><div class="ms-logo-grid"><div class="r"></div><div class="g"></div><div class="b"></div><div class="y"></div></div></div>
+    <span>Microsoft Fabric</span>
+    <span class="sep">|</span>
+    <span style="color:var(--text-muted);font-weight:400">CI/CD & Schema Evolution</span>
+  </div>
+  <div class="nav-links" id="navLinks">
+    <a href="#slide-0" class="active" data-idx="0">Overview</a>
+    <a href="#slide-1" data-idx="1">Platform</a>
+    <a href="#slide-2" data-idx="2">Git Tracking</a>
+    <a href="#slide-3" data-idx="3">The Gap</a>
+    <a href="#slide-4" data-idx="4">Solution</a>
+    <a href="#slide-5" data-idx="5">Pipeline</a>
+    <a href="#slide-6" data-idx="6">Migration Scripts</a>
+    <a href="#slide-7" data-idx="7">Runner</a>
+    <a href="#slide-8" data-idx="8">CI/CD</a>
+    <a href="#slide-9" data-idx="9">APIs</a>
+    <a href="#slide-10" data-idx="10">Architecture</a>
+    <a href="#slide-11" data-idx="11">Summary</a>
+  </div>
+  <div class="nav-controls">
+    <span class="slide-counter" id="slideCounter">1 / 12</span>
+    <button onclick="prevSlide()">← Prev</button>
+    <button onclick="nextSlide()">Next →</button>
+  </div>
+</nav>
+
+<div class="slides" id="slidesContainer">
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 0: TITLE -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-0">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner" style="text-align:center">
+    <div class="animate-in">
+      <div class="customer-badge" style="margin-bottom:24px">
+        <span>📍</span> Prepared for Digital Realty
+      </div>
+    </div>
+    <h1 class="animate-in delay-1" style="font-size:56px;max-width:900px;margin:0 auto 16px">
+      CI/CD for Microsoft Fabric
+    </h1>
+    <p class="subtitle animate-in delay-2" style="max-width:650px;margin:0 auto 40px">
+      Solving Lakehouse schema evolution across Dev, UAT, and Production environments with Schema-as-Code
+    </p>
+    <div class="facts-strip animate-in delay-3">
+      <div class="fact"><div class="fact-num">3</div><div class="fact-label">Environments</div></div>
+      <div class="fact"><div class="fact-num">2</div><div class="fact-label">CI/CD Platforms</div></div>
+      <div class="fact"><div class="fact-num">5</div><div class="fact-label">Delta Tables</div></div>
+      <div class="fact"><div class="fact-num">∞</div><div class="fact-label">Migrations Supported</div></div>
+    </div>
+    <div class="animate-in delay-4" style="margin-top:20px">
+      <p class="small-text">Microsoft Fabric • Azure DevOps • GitHub Actions • REST APIs</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 1: FABRIC PLATFORM OVERVIEW -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-1">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Microsoft Fabric</div>
+    <h2 class="reveal">The Unified Analytics Platform</h2>
+    <p class="subtitle reveal">One platform. One security model. One copy of data.</p>
+
+    <div class="grid-4 reveal">
+      <div class="card">
+        <div class="card-icon">🏗️</div>
+        <h3>Lakehouse</h3>
+        <p>Combines data lake flexibility with warehouse analytics. Stores Delta Lake files in OneLake with a SQL endpoint for querying.</p>
+        <div style="margin-top:12px"><span class="badge badge-blue">Delta Lake</span> <span class="badge badge-blue">Spark</span></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🏢</div>
+        <h3>Warehouse</h3>
+        <p>Full T-SQL data warehouse with read-write access. Supports tables, views, stored procedures. Full Git integration for schemas.</p>
+        <div style="margin-top:12px"><span class="badge badge-green">Full Git Support</span></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📊</div>
+        <h3>Semantic Models</h3>
+        <p>Power BI datasets with Direct Lake, DirectQuery, or Import mode. Version-controlled through Git integration.</p>
+        <div style="margin-top:12px"><span class="badge badge-green">Git Tracked</span></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>Pipelines & Notebooks</h3>
+        <p>Data orchestration and Spark-based transformation. Fully serialized and tracked by Git integration.</p>
+        <div style="margin-top:12px"><span class="badge badge-green">Git Tracked</span></div>
+      </div>
+    </div>
+
+    <div class="highlight-box reveal" style="margin-top:32px">
+      <h3>💡 What is a Lakehouse?</h3>
+      <div class="grid-2" style="margin-top:16px;gap:24px">
+        <div>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">Storage:</strong> Delta Parquet files in OneLake — open format, no vendor lock-in</p>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">Compute:</strong> Apache Spark for engineering, SQL endpoint for analytics</p>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">Access:</strong> Notebooks (PySpark/SQL), SQL endpoint (read-only T-SQL), Power BI (Direct Lake)</p>
+        </div>
+        <div>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">Schema:</strong> Flexible — schema-on-read with enforcement via Delta Lake</p>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">ACID:</strong> Full transactional support through Delta Lake transaction log</p>
+          <p class="small-text" style="margin-bottom:12px"><strong style="color:var(--text)">Best for:</strong> Data engineering, ETL/ELT, ML, medallion architecture (bronze/silver/gold)</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 2: GIT TRACKING -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-2">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Git Integration</div>
+    <h2 class="reveal">What Fabric Tracks in Git</h2>
+    <p class="subtitle reveal">Most artifacts are fully version-controlled. But there's one critical gap.</p>
+
+    <div class="grid-2 reveal" style="gap:0">
+      <div style="background:var(--bg-card);border:1px solid rgba(16,124,16,.3);border-radius:16px 0 0 16px;padding:32px">
+        <h3 style="color:var(--ms-green-light);margin-bottom:20px">✅ Tracked by Git</h3>
+        <table class="track-table">
+          <tr><td><strong>Notebooks</strong></td><td class="status-yes">Full definition + code</td></tr>
+          <tr><td><strong>Data Pipelines</strong></td><td class="status-yes">Full definition</td></tr>
+          <tr><td><strong>Semantic Models</strong></td><td class="status-yes">Full definition</td></tr>
+          <tr><td><strong>Reports</strong></td><td class="status-yes">Full definition</td></tr>
+          <tr><td><strong>Warehouse objects</strong></td><td class="status-yes">Tables, Views, Procs, Functions</td></tr>
+          <tr><td><strong>Spark Environments</strong></td><td class="status-yes">Full definition</td></tr>
+          <tr><td><strong>Dataflows Gen2</strong></td><td class="status-yes">Full definition</td></tr>
+        </table>
+      </div>
+      <div style="background:var(--bg-card);border:1px solid rgba(232,17,35,.3);border-radius:0 16px 16px 0;padding:32px">
+        <h3 style="color:#ff6b6b;margin-bottom:20px">❌ NOT Tracked by Git</h3>
+        <table class="track-table">
+          <tr><td><strong>Lakehouse Tables</strong></td><td class="status-no">Not serialized</td></tr>
+          <tr><td><strong>Lakehouse Views</strong></td><td class="status-no">Not serialized</td></tr>
+          <tr><td><strong>Lakehouse Schemas</strong></td><td class="status-no">Not serialized</td></tr>
+          <tr><td><strong>Column definitions</strong></td><td class="status-no">Not serialized</td></tr>
+          <tr><td><strong>Stored Procedures</strong></td><td class="status-no">Not serialized</td></tr>
+          <tr><td><strong>Table data</strong></td><td class="status-no">Never tracked</td></tr>
+          <tr><td><strong>Files/Folders</strong></td><td class="status-no">Not serialized</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="highlight-box warning reveal" style="margin-top:28px">
+      <h3 style="color:var(--ms-orange)">⚠ What IS tracked for a Lakehouse?</h3>
+      <p class="small-text" style="margin-top:8px">Only the <strong style="color:var(--text)">container metadata</strong>: display name, GUID, OneLake shortcut definitions, and Data Access Roles (preview). The actual table DDL (CREATE TABLE, ALTER TABLE, column names, data types) is <strong style="color:#ff6b6b">never serialized to Git</strong>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 3: THE GAP -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-3">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal" style="color:#ff6b6b">The Problem</div>
+    <h2 class="reveal">The Lakehouse Schema Gap</h2>
+    <p class="subtitle reveal">Schema changes made in Dev don't propagate to UAT or Prod.</p>
+
+    <div class="flow reveal">
+      <div class="flow-row">
+        <div class="flow-box" style="border-color:var(--ms-blue)">
+          <span class="icon">🏗️</span>
+          <div><strong>Dev Lakehouse</strong><br><span class="small-text">CREATE TABLE data_centers (...)</span></div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="flow-box" style="border-color:var(--ms-orange)">
+          <span class="icon">📁</span>
+          <div><strong>Git Repository</strong><br><span class="small-text" style="color:#ff6b6b">⚠ Only container metadata — no tables</span></div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="flow-box" style="border-color:var(--ms-red)">
+          <span class="icon">🏗️</span>
+          <div><strong>UAT Lakehouse</strong><br><span class="small-text" style="color:#ff6b6b">❌ Empty — no tables deployed!</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 reveal" style="margin-top:32px">
+      <div class="highlight-box warning">
+        <h3 style="color:#ff6b6b;font-size:18px">🔥 Real-World Impact</h3>
+        <div class="timeline" style="margin-top:16px">
+          <div class="timeline-item"><h4>Day 1–60</h4><p>Team builds 30 tables in Dev via SQL endpoint. Commits notebooks to Git.</p></div>
+          <div class="timeline-item"><h4>Release Day</h4><p>Deploy to UAT via pipeline. All notebooks arrive — but zero tables exist.</p></div>
+          <div class="timeline-item"><h4>Day 61–63</h4><p>3 days manually recreating tables in UAT. Repeat for Prod.</p></div>
+          <div class="timeline-item" style="margin-bottom:0"><h4>Month 3</h4><p style="color:#ff6b6b"><strong>Column added in Dev, missed in Prod. Production breaks at 2 AM.</strong></p></div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:16px">What Goes Wrong Without a Solution</h3>
+        <div class="steps-list">
+          <div class="step-item">
+            <div class="step-num" style="background:var(--gradient-3);width:32px;height:32px;font-size:14px">1</div>
+            <div class="step-content"><h4>Schema Drift</h4><p>Dev, UAT, and Prod have different table structures. No source of truth.</p></div>
+          </div>
+          <div class="step-item">
+            <div class="step-num" style="background:var(--gradient-3);width:32px;height:32px;font-size:14px">2</div>
+            <div class="step-content"><h4>No Audit Trail</h4><p>No record of who changed what, when. Compliance risk.</p></div>
+          </div>
+          <div class="step-item">
+            <div class="step-num" style="background:var(--gradient-3);width:32px;height:32px;font-size:14px">3</div>
+            <div class="step-content"><h4>No Code Review</h4><p>Schema changes bypass PR reviews and governance controls.</p></div>
+          </div>
+          <div class="step-item">
+            <div class="step-num" style="background:var(--gradient-3);width:32px;height:32px;font-size:14px">4</div>
+            <div class="step-content"><h4>No Rollback</h4><p>Can't revert a bad schema change through Git — must fix forward manually.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 4: SOLUTION OVERVIEW -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-4" style="min-height:auto;padding-bottom:60px">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal" style="color:var(--ms-green-light)">The Solution</div>
+    <h2 class="reveal">Schema-as-Code</h2>
+    <p class="subtitle reveal">Treat your Lakehouse schema like application code. Version it. Review it. Automate it.</p>
+
+    <div class="flow reveal">
+      <div class="flow-row">
+        <div class="flow-box" style="border-color:var(--ms-blue)">
+          <span class="icon">📝</span>
+          <div><strong>Migration Scripts</strong><br><span class="small-text">SQL &amp; PySpark in Git</span></div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="flow-box" style="border-color:var(--ms-purple)">
+          <span class="icon">🔄</span>
+          <div><strong>CI/CD Pipeline</strong><br><span class="small-text">Azure DevOps / GitHub</span></div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="flow-box" style="border-color:var(--ms-orange)">
+          <span class="icon">📓</span>
+          <div><strong>Migration Runner</strong><br><span class="small-text">Fabric Notebook</span></div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="flow-box" style="border-color:var(--ms-green)">
+          <span class="icon">✅</span>
+          <div><strong>Lakehouse</strong><br><span class="small-text">Tables deployed!</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-3 reveal" style="margin-top:40px">
+      <div class="card" style="border-top:3px solid var(--ms-blue)">
+        <h3>🔢 Versioned</h3>
+        <p>Each schema change is a numbered migration file (v001, v002, v003...). Full history in Git with diffs, PRs, and blame.</p>
+      </div>
+      <div class="card" style="border-top:3px solid var(--ms-purple)">
+        <h3>🔁 Idempotent</h3>
+        <p>Run the migration 10 times — same result. Uses <code style="color:var(--ms-orange)">IF NOT EXISTS</code> and a history table to track what's already applied.</p>
+      </div>
+      <div class="card" style="border-top:3px solid var(--ms-green)">
+        <h3>🤖 Automated</h3>
+        <p>Push a migration script → CI/CD applies it to UAT → approval gate → applies to Prod. Zero manual clicks.</p>
+      </div>
+    </div>
+
+    <div class="highlight-box success reveal" style="margin-top:28px">
+      <h3 style="color:var(--ms-green-light)">🎯 This is the industry-standard pattern</h3>
+      <p class="small-text" style="margin-top:8px">The same approach used by Flyway, Liquibase, Django Migrations, Entity Framework Migrations, and Alembic. Proven across millions of production databases worldwide. We're applying it to Fabric Lakehouse.</p>
+    </div>
+
+    <!-- ═══ PRESENTER NOTES — Deep-Dive Walkthrough ═══ -->
+    <div class="notes-section reveal" style="margin-top:36px">
+      <div class="notes-toggle" onclick="toggleNotes(this)">
+        <span class="chevron">▶</span>
+        <span>📋 Presenter Notes — Screen-by-Screen Demo Walkthrough</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400">Click to expand</span>
+      </div>
+      <div class="notes-body">
+        <div class="notes-grid">
+
+          <!-- ── NOTE CARD 1: Migration Scripts ── -->
+          <div class="note-card" style="border-top:3px solid var(--ms-blue)">
+            <h4>📝 1. Migration Scripts — Deep Dive</h4>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px"><strong style="color:var(--text)">Positioning:</strong> "We treat every schema change — new tables, ALTER TABLE, new columns — as a versioned code file, just like application source code."</p>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-blue)">1</div>
+              <div>
+                <strong style="color:var(--text)">Open the Git repo</strong> → navigate to <code style="color:var(--ms-orange);font-size:12px">lakehouse-migrations/migrations/</code>. Show the file listing: <code style="font-size:12px">v001_baseline_tables.sql</code>, <code style="font-size:12px">v002_capacity_and_sustainability.sql</code>, plus the <code style="font-size:12px">.py</code> equivalents.
+                <div class="note-say">"Each file is a numbered migration. The prefix — v001, v002 — makes execution order deterministic. You never wonder what ran first."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-blue)">2</div>
+              <div>
+                <strong style="color:var(--text)">Open v001_baseline_tables.sql</strong> — point out <code style="color:var(--ms-orange);font-size:12px">CREATE TABLE IF NOT EXISTS</code> with <code style="font-size:12px">USING DELTA</code> and <code style="font-size:12px">COMMENT</code> on every column. Show 3 baseline tables: <code style="font-size:12px">data_centers</code>, <code style="font-size:12px">power_consumption</code>, <code style="font-size:12px">cooling_metrics</code>.
+                <div class="note-say">"IF NOT EXISTS makes it idempotent — safe to re-run 100 times. The COMMENT clauses give self-documenting schemas right in the Lakehouse."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-blue)">3</div>
+              <div>
+                <strong style="color:var(--text)">Open v002_capacity_and_sustainability.sql</strong> — show 2 new tables (<code style="font-size:12px">capacity_utilization</code>, <code style="font-size:12px">sla_incidents</code>) plus the <code style="color:var(--ms-orange);font-size:12px">ALTER TABLE power_consumption ADD COLUMNS</code> that adds sustainability columns.
+                <div class="note-say">"This is real schema evolution — new tables AND column additions to existing tables, all in one versioned file that goes through PR review."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-blue)">4</div>
+              <div>
+                <strong style="color:var(--text)">Show the Git diff / PR view</strong> — open a PR or blame view for one of the migration files. Point to the reviewer comments, approval, and merge history.
+                <div class="note-say">"Every schema change has a paper trail: who wrote it, who reviewed it, when it merged. That's your audit log — no extra tooling needed."</div>
+              </div>
+            </div>
+
+            <div style="margin-top:16px;padding:12px 16px;background:rgba(0,120,212,.08);border-radius:8px;border-left:3px solid var(--ms-blue)">
+              <h4 style="font-size:13px;margin-bottom:8px">🤖 Live Copilot Demo — Writing Migration Scripts</h4>
+              <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><strong style="color:var(--text)">Setup:</strong> Open VS Code / GitHub.dev with Copilot Chat. Have the repo open with existing v001 and v002 files visible.</p>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 1 — Generate a new migration:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Generate a v003 migration SQL file for a Fabric Lakehouse Delta table
+called network_monitoring with columns: monitor_id STRING, dc_id STRING,
+measurement_timestamp TIMESTAMP, bandwidth_gbps DOUBLE, packet_loss_pct DOUBLE,
+latency_ms DOUBLE. Follow the same pattern as v001_baseline_tables.sql —
+use CREATE TABLE IF NOT EXISTS, USING DELTA, and add COMMENT on every column.
+Name the file v003_network_monitoring.sql."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 2 — Add columns to an existing table:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Add an ALTER TABLE statement to v003 that adds two new columns to the
+existing cooling_metrics table: energy_recovery_kwh DOUBLE and
+coolant_flow_rate DOUBLE. Follow the pattern from v002 ALTER TABLE."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 3 — Generate the PySpark equivalent:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Convert v003_network_monitoring.sql into a PySpark equivalent
+v003_network_monitoring.py using DeltaTable and spark.sql().
+Follow the same pattern as v001_baseline_tables.py in this repo."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 4 — Validate idempotency:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:6px">
+<span class="string">"Review v003_network_monitoring.sql for idempotency issues.
+Confirm every statement is safe to run multiple times without error.
+Flag any statements that would fail on a second execution."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text-muted);margin-top:10px">
+                <strong>Key Copilot skills to highlight:</strong> <span class="badge badge-blue" style="font-size:10px">Repo context awareness</span> <span class="badge badge-green" style="font-size:10px">Pattern matching from existing files</span> <span class="badge badge-orange" style="font-size:10px">SQL ↔ PySpark translation</span>
+              </p>
+            </div>
+          </div>
+
+          <!-- ── NOTE CARD 2: CI/CD Pipeline ── -->
+          <div class="note-card" style="border-top:3px solid var(--ms-purple)">
+            <h4>🔄 2. CI/CD Pipeline — Deep Dive</h4>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px"><strong style="color:var(--text)">Positioning:</strong> "The pipeline is the enforcer — it makes sure every migration is validated, tested, and promoted through environments automatically."</p>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">1</div>
+              <div>
+                <strong style="color:var(--text)">Open the pipeline YAML</strong> — show <code style="color:var(--ms-orange);font-size:12px">azure-pipelines.yml</code> or <code style="font-size:12px">.github/workflows/deploy-schema.yml</code>. Point out the <strong>trigger path</strong>: <code style="font-size:12px">lakehouse-migrations/**</code>.
+                <div class="note-say">"The pipeline only fires when migration files change. Push a notebook? Nothing happens here. Push a schema change? This pipeline catches it."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">2</div>
+              <div>
+                <strong style="color:var(--text)">Show Stage 1: Validate</strong> — the pipeline lists changed files with <code style="font-size:12px">git diff</code>, then runs syntax checks on every <code style="font-size:12px">.sql</code> file (checks for required patterns like <code style="font-size:12px">IF NOT EXISTS</code>, version prefix, <code style="font-size:12px">USING DELTA</code>).
+                <div class="note-say">"Before anything touches a Lakehouse, we validate. Bad SQL gets caught here, not in production."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">3</div>
+              <div>
+                <strong style="color:var(--text)">Show Stage 2: Deploy to UAT</strong> — walk through the steps: authenticate with Service Principal → acquire Fabric token → call REST API to trigger <code style="font-size:12px">migration_runner</code> notebook → poll for completion → run <code style="font-size:12px">data_quality_checks</code> notebook.
+                <div class="note-say">"No one logs into Fabric. The pipeline authenticates with a service principal, triggers the notebook via API, waits for it to finish, then validates."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">4</div>
+              <div>
+                <strong style="color:var(--text)">Show the Approval Gate</strong> — in Azure DevOps, show the Environment approval policy. In GitHub, show the <code style="font-size:12px">environment: production</code> protection rule with required reviewers.
+                <div class="note-say">"UAT passes? Great. But production requires a human to click Approve. This is where governance lives."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">5</div>
+              <div>
+                <strong style="color:var(--text)">Show Stage 3: Deploy to Prod</strong> — identical steps as UAT but targeting Prod workspace. Show the completed pipeline run with green checks across all stages.
+                <div class="note-say">"Same code, same process, different workspace. That's what eliminates environment drift."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-purple)">6</div>
+              <div>
+                <strong style="color:var(--text)">Show a completed run</strong> — open a recent pipeline execution. Expand the UAT job logs and point to the REST API call, the 202 response, the polling loop, and the final success.
+                <div class="note-say">"Here's the actual execution. You can see the API call, the notebook running, and the validation — all in the pipeline log."</div>
+              </div>
+            </div>
+
+            <div style="margin-top:16px;padding:12px 16px;background:rgba(134,97,197,.08);border-radius:8px;border-left:3px solid var(--ms-purple)">
+              <h4 style="font-size:13px;margin-bottom:8px">🤖 Live Copilot Demo — Building CI/CD Pipelines</h4>
+              <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><strong style="color:var(--text)">Setup:</strong> Open VS Code with Copilot Chat. Have the repo open with the existing pipeline YAML files visible for context.</p>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 1 — Scaffold a GitHub Actions workflow:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Create a GitHub Actions workflow that triggers on push to main when
+files under lakehouse-migrations/ change. It should have 3 jobs:
+1) validate — checkout code, list changed migration files, run syntax
+checks on .sql files. 2) deploy-uat — authenticate with a service
+principal using OIDC, call the Fabric REST API to trigger a notebook
+job, poll until complete, then run data quality checks.
+3) deploy-prod — same as UAT but requires the 'production' environment
+with approval gate. Use the Fabric API base URL
+https://api.fabric.microsoft.com/v1. Reference deploy-schema.yml
+in this repo for patterns."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 2 — Generate the Azure DevOps equivalent:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Convert this GitHub Actions workflow into an Azure DevOps
+azure-pipelines.yml with 3 stages: Validate, Deploy_UAT, Deploy_Prod.
+Use the 'Production' Azure DevOps environment for the approval gate.
+Keep service principal credentials in pipeline variables.
+Follow the patterns in the existing azure-pipelines.yml in this repo."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 3 — Add a drift detection job:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:10px">
+<span class="string">"Add a new job called 'drift-check' to the GitHub Actions workflow
+that runs after deploy-uat. It should call scripts/drift_detector.py
+to compare the Git-exported schema with the live UAT Lakehouse SQL
+endpoint and fail the pipeline if drift is detected."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text);margin-bottom:4px"><strong>Prompt 4 — Generate the REST API helper:</strong></p>
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin-bottom:6px">
+<span class="string">"Write a Python script that authenticates with Azure using a service
+principal (client_id, client_secret, tenant_id from env vars), gets a
+Fabric API token, triggers a notebook job via POST to
+/v1/workspaces/{id}/items/{id}/jobs/instances?jobType=RunNotebook,
+and polls the Location header URL until the job completes or fails.
+Use the retry pattern from scripts/fabric_api_helper.py."</span>
+              </div>
+
+              <p style="font-size:12px;color:var(--text-muted);margin-top:10px">
+                <strong>Key Copilot skills to highlight:</strong> <span class="badge badge-blue" style="font-size:10px">YAML generation</span> <span class="badge badge-green" style="font-size:10px">Cross-platform translation</span> <span class="badge badge-orange" style="font-size:10px">API integration scaffolding</span>
+              </p>
+            </div>
+          </div>
+
+          <!-- ── NOTE CARD 3: Migration Runner ── -->
+          <div class="note-card" style="border-top:3px solid var(--ms-orange)">
+            <h4>📓 3. Migration Runner — Deep Dive</h4>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px"><strong style="color:var(--text)">Positioning:</strong> "This is the execution engine — a parameterized Fabric notebook that knows what has already run and only applies what's new."</p>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-orange)">1</div>
+              <div>
+                <strong style="color:var(--text)">Open migration_runner.py in Fabric</strong> — show the top parameters cell: <code style="font-size:12px">target_environment = "Dev"</code>, <code style="font-size:12px">migration_type = "sql"</code>, <code style="font-size:12px">dry_run = False</code>.
+                <div class="note-say">"The notebook is parameterized. CI/CD passes the target environment — Dev, UAT, or Prod — so the same notebook works everywhere."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-orange)">2</div>
+              <div>
+                <strong style="color:var(--text)">Walk through the 5-step flow</strong> — ① Read parameters → ② Scan <code style="font-size:12px">migrations/</code> folder, sort by version number → ③ Query <code style="color:var(--ms-orange);font-size:12px">_migration_history</code> Delta table for already-applied migrations → ④ Apply only the pending ones → ⑤ Record each result with timestamp, status, duration.
+                <div class="note-say">"It's a 5-step loop: discover, filter, execute, record, report. The history table is the key — it makes this idempotent."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-orange)">3</div>
+              <div>
+                <strong style="color:var(--text)">Run it live</strong> — click <strong>Run All</strong> in the Fabric notebook. Show the output: banner, discovered migrations, "already applied" vs "applying now", and the final summary with ✅ checkmarks.
+                <div class="note-say">"Watch what happens — v001 is skipped because it's already in the history table. Only v002 runs. That's idempotency in action."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-orange)">4</div>
+              <div>
+                <strong style="color:var(--text)">Query the history table</strong> — run <code style="font-size:12px">SELECT * FROM _migration_history ORDER BY applied_at</code> in the SQL endpoint. Show the audit trail: migration name, environment, status, applied_by, timestamp.
+                <div class="note-say">"This is your audit log. Compliance team asks 'when did this column get added to production?' — the answer is right here."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-orange)">5</div>
+              <div>
+                <strong style="color:var(--text)">Re-run the notebook</strong> — run it again to prove idempotency. Output shows "0 migrations pending — environment is up to date."
+                <div class="note-say">"Run it again. Nothing happens. Safe to re-run after failures, retries, or just to verify. That's the idempotency guarantee."</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── NOTE CARD 4: Lakehouse Tables Deployed ── -->
+          <div class="note-card" style="border-top:3px solid var(--ms-green)">
+            <h4>✅ 4. Lakehouse Tables Deployed — Deep Dive</h4>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px"><strong style="color:var(--text)">Positioning:</strong> "This is the payoff — all 3 environments now have identical schemas, deployed from code, with a full audit trail."</p>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-green)">1</div>
+              <div>
+                <strong style="color:var(--text)">Open Dev Lakehouse → Tables</strong> — show all 5 tables: <code style="font-size:12px">data_centers</code>, <code style="font-size:12px">power_consumption</code>, <code style="font-size:12px">cooling_metrics</code>, <code style="font-size:12px">capacity_utilization</code>, <code style="font-size:12px">sla_incidents</code>. Click into <code style="font-size:12px">power_consumption</code> and show the new <code style="font-size:12px">renewable_pct</code> and <code style="font-size:12px">carbon_intensity_kg</code> columns from v002.
+                <div class="note-say">"Dev has all 5 tables plus the sustainability columns. This is exactly what the migration scripts defined."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-green)">2</div>
+              <div>
+                <strong style="color:var(--text)">Switch to UAT Lakehouse → Tables</strong> — show the identical 5 tables. Click into <code style="font-size:12px">power_consumption</code> again to confirm the same columns exist.
+                <div class="note-say">"UAT matches Dev exactly. The pipeline applied the same migrations automatically — no one had to manually create these tables."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-green)">3</div>
+              <div>
+                <strong style="color:var(--text)">Switch to Prod Lakehouse → Tables</strong> — same 5 tables, same columns. Show the SQL endpoint query: <code style="font-size:12px;color:var(--ms-orange)">SELECT COUNT(*) as table_count FROM INFORMATION_SCHEMA.TABLES</code>.
+                <div class="note-say">"Prod matches too. Three environments, same schema, deployed through code and approvals. That's the end state."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-green)">4</div>
+              <div>
+                <strong style="color:var(--text)">Run data quality checks</strong> — open the <code style="font-size:12px">data_quality_checks</code> notebook and run it. Show that it validates table existence, column counts, data types, and returns a summary report.
+                <div class="note-say">"The quality checks are the final gate. They confirm not just that tables exist, but that schemas match what we expect."</div>
+              </div>
+            </div>
+
+            <div class="note-step">
+              <div class="step-marker" style="background:var(--ms-green)">5</div>
+              <div>
+                <strong style="color:var(--text)">Show the _migration_history across all 3</strong> — query the history table in each workspace. Show that all environments report the same migrations applied with their own timestamps.
+                <div class="note-say">"Every environment has its own history. You can always answer: 'What version is Prod on?' with a single query."</div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /notes-grid -->
+
+        <!-- ── Demo Flow Summary ── -->
+        <div style="margin-top:24px;padding:16px 20px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px">
+          <h4 style="font-size:14px;margin-bottom:10px">🎬 Recommended Demo Flow (for customer presentation)</h4>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px">
+            <span class="badge badge-blue">1. Show migration files in Git</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-blue">2. Live-generate v003 with Copilot</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-orange" style="background:rgba(134,97,197,.15);color:#bc8cff;border-color:rgba(134,97,197,.3)">3. Show pipeline YAML</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-orange" style="background:rgba(134,97,197,.15);color:#bc8cff;border-color:rgba(134,97,197,.3)">4. Generate drift-check job with Copilot</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-orange">5. Run migration notebook</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-green">6. Verify tables in all 3 workspaces</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span class="badge badge-green">7. Query _migration_history</span>
+          </div>
+        </div>
+
+      </div><!-- /notes-body -->
+    </div><!-- /notes-section -->
+
+    <!-- ═══ LIVE DEMO DIRECTIONS — Fabric Portal & VS Code ═══ -->
+    <div class="notes-section reveal" style="margin-top:16px">
+      <div class="notes-toggle" onclick="toggleNotes(this)">
+        <span class="chevron">▶</span>
+        <span>🖥️ Live Demo Directions — Fabric Portal &amp; VS Code (Screen-by-Screen)</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400">Click to expand</span>
+      </div>
+      <div class="notes-body">
+
+        <!-- ── PRE-DEMO SETUP ── -->
+        <div style="margin-bottom:28px;padding:20px;background:rgba(255,140,0,.06);border:1px solid rgba(255,140,0,.25);border-radius:12px">
+          <h4 style="font-size:15px;margin-bottom:12px">⚙️ Pre-Demo Setup Checklist</h4>
+          <div class="notes-grid">
+            <div>
+              <p style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:8px">🌐 Browser Tabs (pre-open all):</p>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">1</div><div><strong style="color:var(--text)">Fabric Portal</strong> — <code style="font-size:11px">app.fabric.microsoft.com</code> → Data Engineering experience</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">2</div><div><strong style="color:var(--text)">Dev Workspace</strong> — DigitalRealty-Dev open, Lakehouse visible</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-orange)">3</div><div><strong style="color:var(--text)">UAT Workspace</strong> — DigitalRealty-UAT open in separate tab</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-green)">4</div><div><strong style="color:var(--text)">Prod Workspace</strong> — DigitalRealty-Prod open in separate tab</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-purple)">5</div><div><strong style="color:var(--text)">Deployment Pipeline</strong> — DigitalRealty-Pipeline page open</div></div>
+              <div class="note-step"><div class="step-marker" style="background:#333">6</div><div><strong style="color:var(--text)">GitHub/Azure DevOps</strong> — repo and pipeline/actions pages open</div></div>
+            </div>
+            <div>
+              <p style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:8px">💻 VS Code Setup:</p>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">1</div><div><strong style="color:var(--text)">Open the repo folder</strong> in VS Code — <code style="font-size:11px">File → Open Folder → Fabric_GitHub</code></div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">2</div><div><strong style="color:var(--text)">Copilot extension active</strong> — confirm the Copilot icon shows in the status bar (bottom right)</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">3</div><div><strong style="color:var(--text)">Copilot Chat panel open</strong> — press <kbd style="background:var(--bg-card2);padding:2px 6px;border-radius:4px;font-size:11px">Ctrl+Shift+I</kbd> (or click the Copilot Chat icon in sidebar)</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">4</div><div><strong style="color:var(--text)">Open key files in editor tabs</strong> — have these ready as tabs:<br><code style="font-size:11px">v001_baseline_tables.sql</code> • <code style="font-size:11px">v002_capacity_and_sustainability.sql</code> • <code style="font-size:11px">migration_runner.py</code> • <code style="font-size:11px">azure-pipelines.yml</code></div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">5</div><div><strong style="color:var(--text)">Terminal open</strong> — <kbd style="background:var(--bg-card2);padding:2px 6px;border-radius:4px;font-size:11px">Ctrl+`</kbd> — for optional git commands</div></div>
+              <div class="note-step"><div class="step-marker" style="background:var(--ms-blue)">6</div><div><strong style="color:var(--text)">Browser zoom 125%</strong> — so audience can read code. Collapse sidebar in VS Code for max editor space.</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ ACT 1: VS CODE — Migration Scripts with Copilot ══ -->
+        <div class="note-card" style="border-top:3px solid var(--ms-blue);margin-bottom:20px">
+          <h4 style="font-size:16px">🎬 Act 1: VS Code — Writing Migration Scripts with Copilot</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px"><strong style="color:var(--text)">Goal:</strong> Show the customer how a developer authors schema changes day-to-day using Copilot as an AI pair programmer.</p>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">1</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Explorer panel</strong><br>
+              Click into <code style="font-size:12px">lakehouse-migrations/migrations/</code> in the Explorer. Show the 4 files: <code style="font-size:12px">v001_baseline_tables.sql</code>, <code style="font-size:12px">.py</code>, <code style="font-size:12px">v002_capacity_and_sustainability.sql</code>, <code style="font-size:12px">.py</code>.
+              <div class="note-say">"This is where all schema changes live — versioned files, just like application code. Let me show you how a developer would create a new one."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">2</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Open v001 in editor</strong><br>
+              Click <code style="font-size:12px">v001_baseline_tables.sql</code>. Scroll slowly through it. Point out: <code style="color:var(--ms-orange);font-size:12px">CREATE TABLE IF NOT EXISTS</code>, <code style="font-size:12px">USING DELTA</code>, <code style="font-size:12px">COMMENT</code> on every column, the 3 baseline tables.
+              <div class="note-say">"Every statement is idempotent. USING DELTA tells Fabric to create Delta Lake tables. COMMENTs make the schema self-documenting in the Lakehouse."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">3</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Open v002 in editor</strong><br>
+              Click <code style="font-size:12px">v002_capacity_and_sustainability.sql</code>. Point out: 2 new tables (<code style="font-size:12px">capacity_utilization</code>, <code style="font-size:12px">sla_incidents</code>) PLUS <code style="color:var(--ms-orange);font-size:12px">ALTER TABLE power_consumption ADD COLUMNS</code>.
+              <div class="note-say">"v002 shows real schema evolution — not just new tables but adding columns to an existing one. Both patterns in a single migration."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">4</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Copilot Chat panel</strong><br>
+              Press <kbd style="background:var(--bg-card2);padding:2px 6px;border-radius:4px;font-size:11px">Ctrl+Shift+I</kbd> to open Copilot Chat. Make sure v002 is the active tab (Copilot uses open files as context). Type this prompt:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+<span class="string">Generate a v003 migration SQL file for a Fabric Lakehouse Delta table called
+network_monitoring with columns: monitor_id STRING, dc_id STRING,
+measurement_timestamp TIMESTAMP, bandwidth_gbps DOUBLE, packet_loss_pct DOUBLE,
+latency_ms DOUBLE. Follow the exact same pattern as v001_baseline_tables.sql —
+use CREATE TABLE IF NOT EXISTS, USING DELTA, and add COMMENT on every column.
+Name the file v003_network_monitoring.sql.</span>
+              </div>
+              <div class="note-say">"Watch Copilot pick up the pattern from our existing files — the USING DELTA, the COMMENT style, the IF NOT EXISTS. It learned our conventions."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">5</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Copilot generates the SQL</strong><br>
+              Let Copilot generate the response. Point to the output: correct column types, COMMENT clauses, USING DELTA, IF NOT EXISTS. Click <strong>"Insert at Cursor"</strong> or <strong>"Copy"</strong> to place it into a new file.
+              <div class="note-say">"In 10 seconds, Copilot produced a production-ready migration that follows our exact pattern. No copy-pasting from old files."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">6</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Create the new file</strong><br>
+              Right-click <code style="font-size:12px">lakehouse-migrations/migrations/</code> → <strong>New File</strong> → name it <code style="font-size:12px">v003_network_monitoring.sql</code>. Paste the Copilot output. Save.
+              <div class="note-say">"File created, versioned, ready for PR review. Let me now also ask Copilot to add an ALTER TABLE for an existing table."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">7</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Copilot Chat — ALTER TABLE prompt</strong><br>
+              Type a second prompt:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+<span class="string">Add an ALTER TABLE statement to this v003 migration that adds two new columns to
+the existing cooling_metrics table: energy_recovery_kwh DOUBLE and
+coolant_flow_rate DOUBLE. Follow the ALTER TABLE pattern from v002.</span>
+              </div>
+              <div class="note-say">"Copilot knows the ALTER TABLE pattern from v002. It adds the columns with the right syntax for Delta Lake."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-blue)">8</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Terminal — git status</strong><br>
+              Open terminal (<kbd style="background:var(--bg-card2);padding:2px 6px;border-radius:4px;font-size:11px">Ctrl+`</kbd>). Run <code style="font-size:12px">git status</code> to show the new untracked file. Then <code style="font-size:12px">git diff</code> or use the Source Control panel to show the change.
+              <div class="note-say">"This is a normal git change now. It goes through a PR, gets reviewed, merges to main — and that triggers the CI/CD pipeline."</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;padding:10px 14px;background:rgba(0,120,212,.06);border-radius:8px;border-left:3px solid var(--ms-blue)">
+            <p style="font-size:12px;color:var(--text-muted);margin:0"><strong style="color:var(--text)">💡 Copilot skills to call out:</strong> Context from open files • Pattern matching from repo conventions • SQL ↔ PySpark translation • Idempotency validation</p>
+          </div>
+        </div>
+
+        <!-- ══ ACT 2: VS CODE — CI/CD Pipeline with Copilot ══ -->
+        <div class="note-card" style="border-top:3px solid var(--ms-purple);margin-bottom:20px">
+          <h4 style="font-size:16px">🎬 Act 2: VS Code — Building CI/CD Pipelines with Copilot</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px"><strong style="color:var(--text)">Goal:</strong> Show how Copilot helps scaffold and extend the CI/CD automation that deploys migrations to Fabric.</p>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">1</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Open azure-pipelines.yml</strong><br>
+              Click into <code style="font-size:12px">pipelines/azure-pipelines.yml</code>. Scroll through it. Point out: the <code style="font-size:12px">trigger.paths</code> filter on <code style="font-size:12px">lakehouse-migrations/**</code>, the 3 stages (Validate → Deploy_UAT → Deploy_Prod), the Service Principal auth variables, and the approval gate on the Production environment.
+              <div class="note-say">"This pipeline fires only when migration files change. It validates, deploys to UAT, waits for approval, then deploys to Prod — fully automated."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">2</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Open deploy-schema.yml</strong><br>
+              Click into <code style="font-size:12px">pipelines/.github/workflows/deploy-schema.yml</code>. Show the GitHub Actions equivalent: same 3 jobs (validate → deploy-uat → deploy-prod), <code style="font-size:12px">environment: production</code> for approval gate, OIDC auth.
+              <div class="note-say">"Same pattern, different CI engine. Azure DevOps or GitHub — the schema-as-code approach stays identical."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">3</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Copilot Chat — Generate a new pipeline job</strong><br>
+              With <code style="font-size:12px">deploy-schema.yml</code> as the active tab, type:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+<span class="string">Add a new job called "drift-check" to this GitHub Actions workflow that runs
+after deploy-uat. It should use scripts/drift_detector.py to compare the
+Git-exported schema against the live UAT Lakehouse SQL endpoint. If drift is
+detected, the job should fail and block the production deployment. Use the
+same service principal authentication pattern from the deploy-uat job.</span>
+              </div>
+              <div class="note-say">"I'm asking Copilot to add schema drift detection as a quality gate. It has context from both the workflow and our drift_detector script."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">4</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Review Copilot output</strong><br>
+              Point to the generated YAML: correct <code style="font-size:12px">needs: deploy-uat</code>, auth step, pip install of dependencies, <code style="font-size:12px">python scripts/drift_detector.py</code> invocation with the right env vars. Show that deploy-prod now has <code style="font-size:12px">needs: [deploy-uat, drift-check]</code>.
+              <div class="note-say">"Copilot understood the job dependency chain and slotted drift detection between UAT and Prod. It referenced our actual script."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">5</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code — Copilot Chat — Generate REST API helper</strong><br>
+              Optionally, type:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+<span class="string">Write a Python function that authenticates with a service principal,
+calls the Fabric REST API to trigger a notebook job with
+POST /v1/workspaces/{id}/items/{id}/jobs/instances?jobType=RunNotebook,
+and polls the Location header URL until the job completes or fails.
+Follow the retry pattern from scripts/fabric_api_helper.py.</span>
+              </div>
+              <div class="note-say">"The REST API helper is the glue between CI/CD and Fabric. Copilot generates it following our existing retry pattern."</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;padding:10px 14px;background:rgba(134,97,197,.06);border-radius:8px;border-left:3px solid var(--ms-purple)">
+            <p style="font-size:12px;color:var(--text-muted);margin:0"><strong style="color:var(--text)">💡 Copilot skills to call out:</strong> YAML generation from context • Cross-platform pipeline translation (ADO ↔ GitHub) • API integration scaffolding • Job dependency management</p>
+          </div>
+        </div>
+
+        <!-- ══ ACT 3: FABRIC PORTAL — Migration Runner ══ -->
+        <div class="note-card" style="border-top:3px solid var(--ms-orange);margin-bottom:20px">
+          <h4 style="font-size:16px">🎬 Act 3: Fabric Portal — Running the Migration Notebook</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px"><strong style="color:var(--text)">Goal:</strong> Show the migration runner executing live in Fabric and the before/after of the Lakehouse tables.</p>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">1</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Portal → Dev Workspace → Lakehouse</strong><br>
+              Switch to your browser tab with <code style="font-size:12px">DigitalRealty-Dev</code>. Click on <strong>DataCenterLakehouse</strong>. In the left pane, expand <strong>Tables</strong>. Show the 3 baseline tables: <code style="font-size:12px">data_centers</code>, <code style="font-size:12px">power_consumption</code>, <code style="font-size:12px">cooling_metrics</code>.
+              <div class="note-say">"This is our starting state — 3 tables from v001. Now watch what happens when we run v002."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">2</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Portal → Dev Workspace → Notebook list</strong><br>
+              Go back to the workspace item list. Click on <strong>migration_runner</strong> notebook to open it. The notebook opens in the Fabric notebook editor.
+              <div class="note-say">"This notebook is the execution engine. It's parameterized — CI/CD passes the target environment, but we can also run it manually."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">3</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Notebook → Parameters cell</strong><br>
+              Point to the first cell: <code style="font-size:12px">target_environment = "Dev"</code>, <code style="font-size:12px">migration_type = "sql"</code>, <code style="font-size:12px">dry_run = False</code>. Explain each parameter. Optionally toggle <code style="font-size:12px">dry_run = True</code> first to show a preview.
+              <div class="note-say">"target_environment controls which Lakehouse to apply to. dry_run lets us preview without executing. CI/CD overrides these via API parameters."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">4</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Notebook → Click "Run All"</strong><br>
+              Click <strong>Run All</strong> in the toolbar. Watch the cells execute sequentially. Point to the output as it appears:
+              <ul style="margin:6px 0 0 16px;font-size:12px;color:var(--text-muted)">
+                <li>Banner: "📋 Microsoft Fabric Lakehouse Migration Runner"</li>
+                <li>Discovery: "Found 2 migration files: v001_baseline_tables, v002_capacity_and_sustainability"</li>
+                <li>History check: "v001_baseline_tables → already applied ✓"</li>
+                <li>Execution: "Applying v002_capacity_and_sustainability... ✅ Success (2.3s)"</li>
+                <li>Summary: "1 migration applied, 1 skipped, 0 failed"</li>
+              </ul>
+              <div class="note-say">"v001 was skipped — it's already in the history table. Only v002 ran. That's idempotency — safe to re-run, no duplicates, no errors."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">5</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Notebook → Re-run to prove idempotency</strong><br>
+              Click <strong>Run All</strong> again. Output now shows: "0 migrations pending — environment is up to date."
+              <div class="note-say">"Run it a second time — nothing happens. That's critical for CI/CD — retries and re-runs are safe."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-orange)">6</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric Portal → SQL Endpoint → Query _migration_history</strong><br>
+              Go back to the Lakehouse. Click <strong>SQL analytics endpoint</strong> (top-right dropdown). Open a <strong>New SQL query</strong> and run:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+<span class="keyword">SELECT</span> migration_name, environment, status, applied_at, applied_by
+<span class="keyword">FROM</span> _migration_history
+<span class="keyword">ORDER BY</span> applied_at;
+              </div>
+              Show the results: each migration with its timestamp, environment, and who applied it.
+              <div class="note-say">"This is the audit trail. Compliance asks 'who changed the schema in Prod and when?' — the answer is right here in a Delta table."</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ ACT 4: FABRIC PORTAL — Verify All Environments ══ -->
+        <div class="note-card" style="border-top:3px solid var(--ms-green);margin-bottom:20px">
+          <h4 style="font-size:16px">🎬 Act 4: Fabric Portal — Verifying All 3 Environments</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px"><strong style="color:var(--text)">Goal:</strong> Show the payoff — Dev, UAT, and Prod all have identical schemas, deployed from code.</p>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-green)">1</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric → Dev Lakehouse → Tables (after migration)</strong><br>
+              Navigate back to Dev Lakehouse. Click <strong>Refresh</strong> on the Tables pane. Show 5 tables: <code style="font-size:12px">data_centers</code>, <code style="font-size:12px">power_consumption</code>, <code style="font-size:12px">cooling_metrics</code>, <code style="font-size:12px">capacity_utilization</code>, <code style="font-size:12px">sla_incidents</code>. Click into <code style="font-size:12px">power_consumption</code> → show the new columns <code style="font-size:12px">renewable_pct</code> and <code style="font-size:12px">carbon_intensity_kg</code>.
+              <div class="note-say">"Dev now has all 5 tables plus the sustainability columns. Exactly what the migration scripts defined."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-green)">2</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Switch browser tab → UAT Lakehouse → Tables</strong><br>
+              Click the pre-opened UAT tab. Open <strong>DataCenterLakehouse → Tables</strong>. Show the same 5 tables. Click <code style="font-size:12px">power_consumption</code> to confirm <code style="font-size:12px">renewable_pct</code> and <code style="font-size:12px">carbon_intensity_kg</code> columns are present.
+              <div class="note-say">"UAT matches Dev exactly. The CI/CD pipeline applied the same migration automatically — no one manually created these."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-green)">3</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Switch browser tab → Prod Lakehouse → Tables</strong><br>
+              Click the pre-opened Prod tab. Same drill: <strong>DataCenterLakehouse → Tables</strong> → 5 tables → spot-check columns.
+              <div class="note-say">"All 3 environments are aligned. Same schema, deployed through code and approvals. That's the end state we were after."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-green)">4</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Fabric → Deployment Pipeline view</strong><br>
+              Switch to the Deployment Pipeline tab. Show the 3 stages (Dev → UAT → Prod) with green checkmarks. Point out the compare view showing artifacts are in sync.
+              <div class="note-say">"Fabric's deployment pipeline handles notebooks and pipelines. Our Schema-as-Code handles the tables. Together, full coverage."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-green)">5</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: GitHub/Azure DevOps → Completed pipeline run</strong><br>
+              Switch to the CI/CD tab. Show the most recent run with all stages green. Expand the UAT job to show the log output: auth → API call → notebook triggered → 202 response → polling → success.
+              <div class="note-say">"Here's the full automation trail. From git push to production deployment — every step logged, every approval recorded."</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ ACT 5: CI/CD Pipeline Live Run (Optional) ══ -->
+        <div class="note-card" style="border-top:3px solid var(--ms-purple);margin-bottom:20px">
+          <h4 style="font-size:16px">🎬 Act 5 (Optional): Trigger a Live CI/CD Run</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px"><strong style="color:var(--text)">Goal:</strong> If time allows, push the v003 file you created with Copilot and show the pipeline fire in real time.</p>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">1</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: VS Code → Terminal</strong><br>
+              Run:
+              <div class="code-block" style="font-size:11px;padding:10px 14px;margin:8px 0">
+git add lakehouse-migrations/migrations/v003_network_monitoring.sql
+git commit -m "feat: add v003 network monitoring table"
+git push
+              </div>
+              <div class="note-say">"I'm pushing the migration we just wrote with Copilot. Watch what happens in the pipeline."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">2</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: GitHub Actions / Azure DevOps → Pipeline triggers</strong><br>
+              Switch to the CI/CD browser tab. Refresh. Show the new run starting. Point to the Validate stage beginning.
+              <div class="note-say">"The pipeline detected the change under lakehouse-migrations/ and started automatically. First it validates the SQL syntax."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">3</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Watch UAT deploy job execute</strong><br>
+              If the pipeline runs fast enough, show the UAT job completing. Otherwise, switch to a pre-completed run and say "here's what it looks like when it finishes."
+              <div class="note-say">"The pipeline authenticated, called the Fabric API, triggered the migration runner in UAT, and confirmed success — all without a human touching the portal."</div>
+            </div>
+          </div>
+
+          <div class="note-step">
+            <div class="step-marker" style="background:var(--ms-purple)">4</div>
+            <div>
+              <strong style="color:var(--text)">SCREEN: Approval gate for Prod</strong><br>
+              Show the pipeline waiting at the approval gate. Point to who is requested to approve.
+              <div class="note-say">"Production deployment is blocked until a human approves. This is where governance lives — same controls you use for any release."</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;padding:10px 14px;background:rgba(255,140,0,.06);border-radius:8px;border-left:3px solid var(--ms-orange)">
+            <p style="font-size:12px;color:var(--text-muted);margin:0"><strong style="color:var(--text)">⏱️ Timing tip:</strong> If the live pipeline is slow, have a pre-completed run ready in another tab. Say "Let me show you a completed run while this one finishes." Always have a fallback.</p>
+          </div>
+        </div>
+
+        <!-- ══ QUICK REFERENCE: Tab Switching Order ══ -->
+        <div style="padding:16px 20px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px">
+          <h4 style="font-size:14px;margin-bottom:12px">🗂️ Recommended Tab Order (left to right in browser)</h4>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px">
+            <span class="badge badge-blue" style="font-size:11px">1. Presentation</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-blue" style="font-size:11px">2. VS Code</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-blue" style="font-size:11px">3. Fabric Dev</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-orange" style="font-size:11px">4. Fabric UAT</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-green" style="font-size:11px">5. Fabric Prod</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span style="background:rgba(134,97,197,.15);color:#bc8cff;border:1px solid rgba(134,97,197,.3);display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">6. Deploy Pipeline</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-blue" style="font-size:11px">7. GitHub/ADO</span>
+            <span style="color:var(--text-muted)">|</span>
+            <span class="badge badge-blue" style="font-size:11px">8. CI/CD Runs</span>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:10px">💡 <strong style="color:var(--text)">Pro tip:</strong> Use <kbd style="background:var(--bg-card2);padding:2px 6px;border-radius:4px;font-size:11px">Ctrl+Tab</kbd> to cycle. Keep VS Code as <kbd style="font-size:11px">Alt+Tab</kbd> target for quick switches. Close all non-demo browser tabs beforehand.</p>
+        </div>
+
+      </div><!-- /notes-body -->
+    </div><!-- /notes-section -->
+
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 5: DEPLOYMENT PIPELINE -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-5">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Environments</div>
+    <h2 class="reveal">Deployment Pipeline</h2>
+    <p class="subtitle reveal">Three environments. One promotion path. Full governance.</p>
+
+    <div class="pipeline reveal">
+      <div class="pipeline-stage dev">
+        <div class="stage-label">Development</div>
+        <div class="stage-name">DigitalRealty-Dev</div>
+        <div class="stage-items">
+          DataCenterLakehouse<br>
+          Notebooks • Pipelines
+        </div>
+      </div>
+      <div class="pipeline-arrow">
+        <div style="text-align:center">
+          <div style="font-size:14px;color:var(--ms-blue-light)">Deploy</div>
+          <div>→→→</div>
+        </div>
+      </div>
+      <div class="pipeline-stage uat">
+        <div class="stage-label">Test (UAT)</div>
+        <div class="stage-name">DigitalRealty-UAT</div>
+        <div class="stage-items">
+          DataCenterLakehouse<br>
+          Notebooks • Pipelines
+        </div>
+      </div>
+      <div class="pipeline-arrow">
+        <div style="text-align:center">
+          <div style="font-size:14px;color:var(--ms-orange)">Approve</div>
+          <div>→→→</div>
+        </div>
+      </div>
+      <div class="pipeline-stage prod">
+        <div class="stage-label">Production</div>
+        <div class="stage-name">DigitalRealty-Prod</div>
+        <div class="stage-items">
+          DataCenterLakehouse<br>
+          Notebooks • Pipelines
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 reveal" style="margin-top:32px">
+      <div class="card">
+        <h3>📦 What Deployment Pipelines Handle</h3>
+        <p style="margin-top:8px">Notebooks, Data Pipelines, Semantic Models, Reports, Spark Environments — all Fabric-native artifacts. One-click or API-driven promotion between stages.</p>
+        <div style="margin-top:12px"><span class="badge badge-green">Standard Artifacts</span></div>
+      </div>
+      <div class="card">
+        <h3>🔧 What Schema-as-Code Adds</h3>
+        <p style="margin-top:8px">Lakehouse table schemas, views, ALTER TABLE changes, column additions — everything the Deployment Pipeline doesn't cover. Runs as a CI/CD step alongside artifact deployment.</p>
+        <div style="margin-top:12px"><span class="badge badge-orange">Schema Layer</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 6: MIGRATION SCRIPTS -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-6">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Schema-as-Code</div>
+    <h2 class="reveal">Migration Scripts</h2>
+    <p class="subtitle reveal">Versioned SQL and PySpark scripts that define your schema. Git is the source of truth.</p>
+
+    <div class="grid-2 reveal">
+      <div>
+        <h3 style="margin-bottom:12px"><span class="badge badge-blue">v001</span> Baseline Tables</h3>
+        <div class="code-block">
+          <div class="lang">SQL</div>
+<span class="comment">-- v001_baseline_tables.sql</span>
+<span class="comment">-- Data Center Operations baseline schema</span>
+
+<span class="keyword">CREATE TABLE IF NOT EXISTS</span> <span class="type">data_centers</span> (
+    dc_id           <span class="type">STRING</span>,
+    dc_name         <span class="type">STRING</span>,
+    region          <span class="type">STRING</span>,
+    city            <span class="type">STRING</span>,
+    total_capacity_kw <span class="type">DOUBLE</span>
+);
+
+<span class="keyword">CREATE TABLE IF NOT EXISTS</span> <span class="type">power_consumption</span> (
+    reading_id      <span class="type">STRING</span>,
+    dc_id           <span class="type">STRING</span>,
+    reading_ts      <span class="type">TIMESTAMP</span>,
+    power_kw        <span class="type">DOUBLE</span>,
+    pue_ratio       <span class="type">DOUBLE</span>
+);
+
+<span class="keyword">CREATE TABLE IF NOT EXISTS</span> <span class="type">cooling_metrics</span> (
+    metric_id       <span class="type">STRING</span>,
+    dc_id           <span class="type">STRING</span>,
+    reading_ts      <span class="type">TIMESTAMP</span>,
+    inlet_temp_c    <span class="type">DOUBLE</span>,
+    outlet_temp_c   <span class="type">DOUBLE</span>
+);
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px"><span class="badge badge-orange">v002</span> Schema Evolution</h3>
+        <div class="code-block">
+          <div class="lang">SQL</div>
+<span class="comment">-- v002_capacity_and_sustainability.sql</span>
+<span class="comment">-- Add sustainability tracking tables</span>
+
+<span class="keyword">CREATE TABLE IF NOT EXISTS</span> <span class="type">capacity_utilization</span> (
+    record_id       <span class="type">STRING</span>,
+    dc_id           <span class="type">STRING</span>,
+    snapshot_date   <span class="type">DATE</span>,
+    total_racks     <span class="type">INT</span>,
+    occupied_racks  <span class="type">INT</span>,
+    utilization_pct <span class="type">DOUBLE</span>
+);
+
+<span class="keyword">CREATE TABLE IF NOT EXISTS</span> <span class="type">sla_incidents</span> (
+    incident_id     <span class="type">STRING</span>,
+    dc_id           <span class="type">STRING</span>,
+    severity        <span class="type">STRING</span>,
+    root_cause      <span class="type">STRING</span>
+);
+
+<span class="comment">-- Evolve existing table</span>
+<span class="keyword">ALTER TABLE</span> <span class="type">power_consumption</span>
+  <span class="keyword">ADD COLUMNS</span> (
+    renewable_pct       <span class="type">DOUBLE</span>,
+    carbon_intensity_kg <span class="type">DOUBLE</span>
+  );
+        </div>
+      </div>
+    </div>
+
+    <div class="highlight-box reveal" style="margin-top:28px">
+      <div class="grid-3" style="gap:32px">
+        <div>
+          <h3 style="font-size:16px;margin-bottom:8px">📁 File Naming</h3>
+          <p class="small-text"><code style="color:var(--ms-orange)">v001_</code>, <code style="color:var(--ms-orange)">v002_</code>, <code style="color:var(--ms-orange)">v003_</code>... — version prefix ensures execution order is explicit and deterministic.</p>
+        </div>
+        <div>
+          <h3 style="font-size:16px;margin-bottom:8px">🛡️ Idempotency</h3>
+          <p class="small-text"><code style="color:var(--ms-orange)">IF NOT EXISTS</code> on every CREATE. Safe to re-run. No duplicate tables. No errors on retry.</p>
+        </div>
+        <div>
+          <h3 style="font-size:16px;margin-bottom:8px">🌐 Dual Format</h3>
+          <p class="small-text">Every migration available as <strong>SQL</strong> (simpler) and <strong>PySpark</strong> (more powerful). Choose based on complexity.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 7: MIGRATION RUNNER -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-7">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Execution Engine</div>
+    <h2 class="reveal">Migration Runner Notebook</h2>
+    <p class="subtitle reveal">A parameterized Fabric notebook that applies only new migrations. Idempotent. Safe. Auditable.</p>
+
+    <div class="grid-2 reveal">
+      <div>
+        <div class="steps-list">
+          <div class="step-item">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <h4>Read Parameters</h4>
+              <p>Target environment (Dev/UAT/Prod) and migration type (SQL/PySpark). Passed by CI/CD or set manually.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <h4>Scan Migration Files</h4>
+              <p>Reads all migration scripts from the <code style="color:var(--ms-orange)">lakehouse-migrations/migrations/</code> folder. Sorts by version number.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <h4>Check History</h4>
+              <p>Queries the <code style="color:var(--ms-orange)">_migration_history</code> Delta table to find which migrations have already been applied.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <h4>Apply New Migrations</h4>
+              <p>Runs only the migrations that haven't been applied. Logs each one with timestamp, status, and duration.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">5</div>
+            <div class="step-content">
+              <h4>Record State</h4>
+              <p>Writes each successful migration to <code style="color:var(--ms-orange)">_migration_history</code>. Creates a permanent audit trail.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="code-block" style="font-size:12px">
+          <div class="lang">Python — Notebook</div>
+<span class="comment"># migration_runner.py</span>
+<span class="comment"># Parameterized Fabric notebook</span>
+
+<span class="comment"># ── Parameters ──</span>
+<span class="type">target_environment</span> = <span class="string">"Dev"</span>   <span class="comment"># Dev | UAT | Prod</span>
+<span class="type">migration_type</span>     = <span class="string">"sql"</span>   <span class="comment"># sql | pyspark</span>
+
+<span class="comment"># ── Step 1: Get available migrations ──</span>
+<span class="type">migration_files</span> = <span class="function">get_migration_files</span>(
+    migration_type
+)
+
+<span class="comment"># ── Step 2: Check what's already applied ──</span>
+<span class="type">applied</span> = spark.sql(<span class="string">"""
+    SELECT migration_name
+    FROM _migration_history
+    WHERE environment = '{}'
+"""</span>.format(target_environment))
+
+<span class="comment"># ── Step 3: Find pending migrations ──</span>
+<span class="type">pending</span> = [m <span class="keyword">for</span> m <span class="keyword">in</span> migration_files
+           <span class="keyword">if</span> m.name <span class="keyword">not in</span> applied_set]
+
+<span class="comment"># ── Step 4: Apply each one ──</span>
+<span class="keyword">for</span> migration <span class="keyword">in</span> pending:
+    <span class="function">print</span>(<span class="string">f"Applying: {migration.name}"</span>)
+    spark.sql(migration.read_text())
+    <span class="function">record_migration</span>(
+        migration.name,
+        target_environment,
+        <span class="string">"success"</span>
+    )
+    <span class="function">print</span>(<span class="string">f"✅ {migration.name} applied"</span>)
+
+<span class="function">print</span>(<span class="string">f"Done! {len(pending)} applied."</span>)
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 8: CI/CD PIPELINES -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-8">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Automation</div>
+    <h2 class="reveal">CI/CD Pipelines</h2>
+    <p class="subtitle reveal">Push a migration script. Watch it deploy automatically across all environments.</p>
+
+    <div class="grid-2 reveal">
+      <div class="card" style="border-top:3px solid #0078d4">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <span style="font-size:28px">🔷</span>
+          <h3 style="margin:0">Azure DevOps Pipeline</h3>
+        </div>
+        <div class="code-block" style="font-size:11px">
+          <div class="lang">YAML</div>
+<span class="keyword">trigger</span>:
+  <span class="keyword">paths</span>:
+    <span class="keyword">include</span>:
+      - <span class="string">lakehouse-migrations/**</span>
+
+<span class="keyword">stages</span>:
+  - <span class="keyword">stage</span>: <span class="string">Validate</span>
+    <span class="comment"># Syntax check migration scripts</span>
+
+  - <span class="keyword">stage</span>: <span class="string">Deploy_UAT</span>
+    <span class="comment"># Authenticate with Service Principal</span>
+    <span class="comment"># Call Fabric REST API</span>
+    <span class="comment"># Trigger migration_runner notebook</span>
+    <span class="comment"># Run data quality checks</span>
+
+  - <span class="keyword">stage</span>: <span class="string">Deploy_Prod</span>
+    <span class="keyword">condition</span>: <span class="string">succeeded()</span>
+    <span class="comment"># ⏸ Manual approval gate</span>
+    <span class="comment"># Same steps as UAT</span>
+        </div>
+      </div>
+      <div class="card" style="border-top:3px solid #fff">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <span style="font-size:28px">⚫</span>
+          <h3 style="margin:0">GitHub Actions Workflow</h3>
+        </div>
+        <div class="code-block" style="font-size:11px">
+          <div class="lang">YAML</div>
+<span class="keyword">on</span>:
+  <span class="keyword">push</span>:
+    <span class="keyword">paths</span>:
+      - <span class="string">'lakehouse-migrations/**'</span>
+
+<span class="keyword">jobs</span>:
+  <span class="keyword">validate</span>:
+    <span class="comment"># Parse and syntax-check scripts</span>
+
+  <span class="keyword">deploy-uat</span>:
+    <span class="keyword">needs</span>: <span class="string">validate</span>
+    <span class="comment"># Authenticate via OIDC (no secrets!)</span>
+    <span class="comment"># Call Fabric REST API</span>
+    <span class="comment"># Trigger migration_runner notebook</span>
+    <span class="comment"># Verify tables exist</span>
+
+  <span class="keyword">deploy-prod</span>:
+    <span class="keyword">needs</span>: <span class="string">deploy-uat</span>
+    <span class="keyword">environment</span>: <span class="string">production</span>
+    <span class="comment"># ⏸ Environment protection rules</span>
+    <span class="comment"># Same automation as UAT</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="highlight-box reveal" style="margin-top:28px">
+      <div class="grid-2" style="gap:32px">
+        <div>
+          <h3 style="font-size:16px;margin-bottom:8px">🔐 Authentication</h3>
+          <p class="small-text">Service Principal stored in Azure Key Vault. OIDC federation for GitHub (zero secrets). Token scoped to <code style="color:var(--ms-orange)">api.fabric.microsoft.com</code>.</p>
+        </div>
+        <div>
+          <h3 style="font-size:16px;margin-bottom:8px">🚦 Approval Gates</h3>
+          <p class="small-text">Azure DevOps: stage-level approvals. GitHub: environment protection rules. No one deploys to Prod without sign-off.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 9: REST APIs -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-9">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Programmability</div>
+    <h2 class="reveal">Fabric REST APIs</h2>
+    <p class="subtitle reveal">Everything in Fabric is API-driven. No manual clicks needed for automation.</p>
+
+    <div class="grid-2 reveal">
+      <div class="card">
+        <h3 style="margin-bottom:16px">🔌 Key API Endpoints</h3>
+        <table class="track-table">
+          <tr><td><strong>List Workspaces</strong></td><td class="small-text"><code>GET /v1/workspaces</code></td></tr>
+          <tr><td><strong>List Items</strong></td><td class="small-text"><code>GET /v1/workspaces/{id}/items</code></td></tr>
+          <tr><td><strong>Run Notebook</strong></td><td class="small-text"><code>POST .../jobs/instances?jobType=RunNotebook</code></td></tr>
+          <tr><td><strong>Deploy Pipeline</strong></td><td class="small-text"><code>POST /v1/deploymentPipelines/{id}/deploy</code></td></tr>
+          <tr><td><strong>Git Commit</strong></td><td class="small-text"><code>POST /v1/workspaces/{id}/git/commitToGit</code></td></tr>
+          <tr><td><strong>Git Sync</strong></td><td class="small-text"><code>POST /v1/workspaces/{id}/git/updateFromGit</code></td></tr>
+        </table>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px">Example: Trigger Migration</h3>
+        <div class="code-block" style="font-size:12px">
+          <div class="lang">Python</div>
+<span class="keyword">import</span> requests
+
+<span class="comment"># Authenticate</span>
+token = <span class="function">get_fabric_token</span>(
+    client_id, client_secret, tenant_id
+)
+headers = {
+    <span class="string">"Authorization"</span>: <span class="string">f"Bearer {token}"</span>
+}
+
+<span class="comment"># Trigger notebook in UAT workspace</span>
+r = requests.<span class="function">post</span>(
+    <span class="string">f"https://api.fabric.microsoft.com"</span>
+    <span class="string">f"/v1/workspaces/{uat_ws_id}"</span>
+    <span class="string">f"/items/{notebook_id}"</span>
+    <span class="string">f"/jobs/instances?jobType=RunNotebook"</span>,
+    headers=headers,
+    json={
+        <span class="string">"executionData"</span>: {
+            <span class="string">"parameters"</span>: {
+                <span class="string">"target_environment"</span>: <span class="string">"UAT"</span>
+            }
+        }
+    }
+)
+
+<span class="comment"># Poll for completion</span>
+job_url = r.headers[<span class="string">"Location"</span>]
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 10: FULL ARCHITECTURE -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-10">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner">
+    <div class="slide-label reveal">Architecture</div>
+    <h2 class="reveal">Complete CI/CD Architecture</h2>
+    <p class="subtitle reveal">Two parallel tracks working together for full coverage.</p>
+
+    <div class="compare reveal">
+      <div class="compare-side">
+        <h3><span class="badge badge-green" style="font-size:13px;padding:4px 12px">Track 1</span> Standard Artifacts</h3>
+        <p class="small-text" style="margin-bottom:16px;color:var(--ms-green-light)">Handled by Fabric Git + Deployment Pipelines</p>
+        <ul class="compare-green">
+          <li>Notebooks committed to Git from workspace</li>
+          <li>Data Pipelines synced via Git integration</li>
+          <li>Semantic Models and Reports versioned</li>
+          <li>Deployment Pipeline promotes Dev → UAT → Prod</li>
+          <li>Environment-specific configuration rules</li>
+          <li>Built into Fabric — no custom code needed</li>
+        </ul>
+      </div>
+      <div class="compare-side" style="background:var(--bg-card2)">
+        <h3><span class="badge badge-orange" style="font-size:13px;padding:4px 12px">Track 2</span> Schema Evolution</h3>
+        <p class="small-text" style="margin-bottom:16px;color:var(--ms-orange)">Handled by Schema-as-Code + CI/CD Pipeline</p>
+        <ul class="compare-green">
+          <li>Migration scripts (SQL/PySpark) in Git</li>
+          <li>PR reviews enforce schema governance</li>
+          <li>Migration runner notebook applies changes</li>
+          <li>CI/CD pipeline triggers notebook via REST API</li>
+          <li>Approval gates for production deployment</li>
+          <li>History table provides audit trail</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="highlight-box success reveal" style="margin-top:28px">
+      <h3 style="color:var(--ms-green-light)">🏗️ Lakehouse vs Warehouse: When to Use Each</h3>
+      <div class="grid-2" style="margin-top:16px;gap:24px">
+        <div>
+          <h4 style="font-size:15px;margin-bottom:8px">🏗️ Lakehouse</h4>
+          <p class="small-text">Data engineering, ETL/ELT, ML, semi-structured data, medallion architecture (bronze/silver), Direct Lake for Power BI. <strong style="color:var(--ms-orange)">Schema tracked via Schema-as-Code.</strong></p>
+        </div>
+        <div>
+          <h4 style="font-size:15px;margin-bottom:8px">🏢 Warehouse</h4>
+          <p class="small-text">BI reporting, curated gold layer, full T-SQL, stored procedures, multi-table transactions. <strong style="color:var(--ms-green-light)">Schema tracked natively by Git integration.</strong></p>
+        </div>
+      </div>
+      <p class="small-text" style="margin-top:16px;text-align:center"><strong style="color:var(--text)">Best practice:</strong> Use BOTH together — Lakehouse for engineering, Warehouse for serving. Full schema tracking across the board.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SLIDE 11: SUMMARY -->
+<!-- ════════════════════════════════════════════════ -->
+<section class="slide" id="slide-11">
+  <div class="dot-pattern"></div>
+  <div class="slide-inner" style="text-align:center">
+    <div class="slide-label reveal">Summary</div>
+    <h2 class="reveal" style="font-size:44px;max-width:800px;margin:0 auto 24px">
+      The Schema Gap Has a Solution
+    </h2>
+    <p class="subtitle reveal" style="max-width:650px;margin:0 auto 48px">
+      Schema-as-Code + CI/CD + REST APIs = full coverage for Fabric Lakehouse promotion across all environments.
+    </p>
+
+    <div class="grid-3 reveal" style="text-align:left;margin-bottom:48px">
+      <div class="card" style="border-top:3px solid var(--ms-blue)">
+        <div class="card-icon" style="background:rgba(0,120,212,.12)">📝</div>
+        <h3>Version Everything</h3>
+        <p>Every table, every column, every ALTER — in Git. PR reviews. Audit trail. Rollback capability.</p>
+      </div>
+      <div class="card" style="border-top:3px solid var(--ms-purple)">
+        <div class="card-icon" style="background:rgba(134,97,197,.12)">🤖</div>
+        <h3>Automate Everything</h3>
+        <p>Push to Git → CI/CD validates → deploys to UAT → approval → deploys to Prod. Zero manual steps.</p>
+      </div>
+      <div class="card" style="border-top:3px solid var(--ms-green)">
+        <div class="card-icon" style="background:rgba(16,124,16,.12)">🔌</div>
+        <h3>API Everything</h3>
+        <p>Fabric REST APIs power the automation. List, deploy, execute, monitor — all programmable.</p>
+      </div>
+    </div>
+
+    <div class="highlight-box reveal" style="max-width:700px;margin:0 auto">
+      <h3>🚀 Next Steps</h3>
+      <div class="steps-list" style="margin-top:16px">
+        <div class="step-item">
+          <div class="step-num" style="width:32px;height:32px;font-size:14px">1</div>
+          <div class="step-content"><p>Extract existing Dev Lakehouse schemas into versioned migration scripts</p></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num" style="width:32px;height:32px;font-size:14px">2</div>
+          <div class="step-content"><p>Deploy the migration runner notebook to all workspaces</p></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num" style="width:32px;height:32px;font-size:14px">3</div>
+          <div class="step-content"><p>Set up CI/CD pipeline in Azure DevOps or GitHub Actions</p></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num" style="width:32px;height:32px;font-size:14px">4</div>
+          <div class="step-content"><p>Establish governance: all schema changes go through PRs</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reveal" style="margin-top:48px">
+      <p class="small-text" style="margin-bottom:16px">📧 Questions? Follow-up? Let's continue the conversation.</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="https://learn.microsoft.com/en-us/rest/api/fabric/" target="_blank" style="color:var(--ms-blue-light);font-size:13px">📘 Fabric REST API Docs</a>
+        <span style="color:var(--border)">•</span>
+        <a href="https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-automation" target="_blank" style="color:var(--ms-blue-light);font-size:13px">📘 Git Automation</a>
+        <span style="color:var(--border)">•</span>
+        <a href="https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/pipeline-automation-fabric" target="_blank" style="color:var(--ms-blue-light);font-size:13px">📘 Pipeline API</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /slides -->
+
+<footer>
+  <p>Microsoft Fabric CI/CD Solution — Prepared for Digital Realty</p>
+  <p style="margin-top:4px">
+    <a href="https://learn.microsoft.com/en-us/fabric/" target="_blank">Microsoft Fabric Documentation</a>
+  </p>
+</footer>
+
+<script>
+// ═══ SCROLL REVEAL ═══
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ═══ ACTIVE NAV LINK ═══
+const slides = document.querySelectorAll('.slide');
+const navLinks = document.querySelectorAll('.nav-links a');
+const slideCounter = document.getElementById('slideCounter');
+
+const slideObserver = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      const idx = Array.from(slides).indexOf(e.target);
+      navLinks.forEach(l => l.classList.remove('active'));
+      navLinks[idx]?.classList.add('active');
+      slideCounter.textContent = `${idx + 1} / ${slides.length}`;
+    }
+  });
+}, { threshold: 0.5 });
+slides.forEach(s => slideObserver.observe(s));
+
+// ═══ KEYBOARD NAV ═══
+let currentSlide = 0;
+function goToSlide(idx) {
+  if (idx < 0 || idx >= slides.length) return;
+  currentSlide = idx;
+  slides[idx].scrollIntoView({ behavior: 'smooth' });
+}
+function nextSlide() { goToSlide(currentSlide + 1); }
+function prevSlide() { goToSlide(currentSlide - 1); }
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  switch (e.key) {
+    case 'ArrowRight': case 'ArrowDown': e.preventDefault(); nextSlide(); break;
+    case 'ArrowLeft': case 'ArrowUp': e.preventDefault(); prevSlide(); break;
+    case 'Home': e.preventDefault(); goToSlide(0); break;
+    case 'End': e.preventDefault(); goToSlide(slides.length - 1); break;
+  }
+});
+
+// Keep currentSlide in sync with scroll
+window.addEventListener('scroll', () => {
+  const scrollPos = window.scrollY + window.innerHeight / 2;
+  slides.forEach((s, i) => {
+    if (scrollPos >= s.offsetTop && scrollPos < s.offsetTop + s.offsetHeight) {
+      currentSlide = i;
+    }
+  });
+});
+
+// ═══ NOTES TOGGLE ═══
+function toggleNotes(btn) {
+  btn.classList.toggle('open');
+  const body = btn.nextElementSibling;
+  body.classList.toggle('open');
+}
+</script>
+</body>
+</html>

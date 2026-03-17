@@ -1,0 +1,2026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fabric CI/CD Demo Guide — Digital Realty</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1f2630;
+    --surface-3: #212936;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #3fb950;
+    --purple: #bc8cff;
+    --warning: #d29922;
+    --danger: #f85149;
+    --danger-soft: #ff7b72;
+    --orange: #f0883e;
+    --note-bg: #111a2a;
+    --note-border: #2d4a7a;
+    --tip-bg: #122117;
+    --tip-border: #2d6a3d;
+    --qa-bg: rgba(240, 136, 62, 0.08);
+    --qa-border: rgba(240, 136, 62, 0.45);
+    --shadow: 0 18px 40px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  button, input, textarea, select { font: inherit; }
+  code, pre, kbd { font-family: 'Cascadia Code', Consolas, monospace; }
+  a { color: inherit; }
+
+  .topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 24px;
+    background: rgba(22, 27, 34, 0.96);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(14px);
+  }
+  .logo-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 225px;
+  }
+  .logo {
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.2px;
+  }
+  .logo span { color: var(--text); }
+  .tagline {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .timer-pill {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.66);
+  }
+  .timer {
+    min-width: 72px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent-2);
+  }
+  .topbar .controls {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.15s ease;
+    box-shadow: none;
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    border-color: #4b5563;
+    background: #262f3d;
+  }
+  .btn.active {
+    background: rgba(88, 166, 255, 0.18);
+    border-color: rgba(88, 166, 255, 0.5);
+    color: #dbeafe;
+  }
+  .btn.warn.active {
+    background: rgba(240, 136, 62, 0.16);
+    border-color: rgba(240, 136, 62, 0.55);
+    color: #ffddb9;
+  }
+  .btn.primary {
+    background: rgba(63, 185, 80, 0.14);
+    border-color: rgba(63, 185, 80, 0.45);
+  }
+
+  .progress-track {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    z-index: 119;
+    background: rgba(48, 54, 61, 0.85);
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .3s ease;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 68px;
+    left: 0;
+    bottom: 0;
+    width: 300px;
+    padding: 16px 0 24px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+  .sidebar-summary {
+    margin: 0 16px 16px;
+    padding: 16px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(88,166,255,0.12), rgba(88,166,255,0.04));
+    box-shadow: var(--shadow);
+  }
+  .sidebar-summary h1 {
+    margin: 0 0 6px;
+    font-size: 16px;
+  }
+  .sidebar-summary p {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .summary-card {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(13, 17, 23, 0.55);
+    border: 1px solid rgba(88,166,255,0.1);
+  }
+  .summary-card .label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 4px;
+  }
+  .summary-card strong { font-size: 14px; }
+  .sidebar h3 {
+    margin: 18px 0 8px;
+    padding: 0 20px;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  .sidebar a, .sidebar button.linklike {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-left: 3px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: none;
+    text-align: left;
+    padding: 8px 20px;
+    cursor: pointer;
+    transition: 0.15s ease;
+    font-size: 13px;
+  }
+  .sidebar a:hover, .sidebar button.linklike:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .sidebar a.active {
+    color: var(--accent);
+    background: rgba(88, 166, 255, 0.08);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+  .sidebar .num {
+    min-width: 42px;
+    display: inline-flex;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(48,54,61,0.9);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .sidebar .check { color: var(--accent-2); }
+  .sidebar .meta-link { padding-left: 36px; }
+  .sidebar .kb-link::before { content: '📚'; }
+  .sidebar .qa-link::before { content: '❓'; }
+
+  main {
+    margin-left: 300px;
+    padding: 100px 40px 100px;
+    max-width: 1180px;
+  }
+  .links-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .links-bar a {
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    text-decoration: none;
+    font-size: 13px;
+    color: var(--accent);
+    background: rgba(31,38,48,0.8);
+  }
+  .links-bar a:hover { background: #253043; }
+
+  .part-header {
+    margin: 0 0 22px;
+    padding: 24px 26px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, rgba(88,166,255,0.1), rgba(22,27,34,1));
+    box-shadow: var(--shadow);
+  }
+  .part-header + .step { margin-top: 0; }
+  .part-num {
+    color: var(--accent);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .part-header h2 {
+    margin: 0 0 10px;
+    font-size: 28px;
+  }
+  .part-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(13,17,23,0.45);
+    color: var(--text);
+  }
+  .goal {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(13,17,23,0.5);
+    border-left: 4px solid var(--accent);
+    color: #d0d7de;
+    font-size: 14px;
+  }
+
+  .step {
+    margin-bottom: 18px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 8px 26px rgba(0,0,0,0.18);
+  }
+  .step.current {
+    border-color: rgba(88,166,255,0.7);
+    box-shadow: 0 0 0 1px rgba(88,166,255,0.35), 0 10px 28px rgba(0,0,0,0.25);
+  }
+  .step.done { opacity: 0.92; }
+  .step.done .step-num {
+    background: var(--accent-2);
+    color: #04160a;
+  }
+  .step-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: background .15s ease;
+  }
+  .step-head:hover { background: rgba(88,166,255,0.04); }
+  .step-num {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: #081018;
+    font-weight: 700;
+    font-size: 14px;
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
+  }
+  .step-title-block {
+    min-width: 0;
+  }
+  .step-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .step-subtitle {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .step-screen {
+    font-size: 12px;
+    color: #f5d0fe;
+    border: 1px solid rgba(188,140,255,0.3);
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(188,140,255,0.09);
+  }
+  .step-status {
+    font-size: 18px;
+  }
+  .step-body {
+    padding: 0 20px 20px;
+  }
+  .step-body.collapsed { display: none; }
+
+  .action {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-top: 1px solid rgba(48,54,61,0.6);
+  }
+  .action:first-child { border-top: 0; }
+  .action-check {
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+    border-radius: 6px;
+    border: 2px solid #4b5563;
+    background: transparent;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: 0.15s ease;
+  }
+  .action-check:hover { border-color: var(--accent); }
+  .action-check.checked {
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+  }
+  .action-check.checked::after {
+    content: '✓';
+    color: #06180b;
+    font-weight: 900;
+    font-size: 13px;
+  }
+  .action-do {
+    color: var(--text);
+    font-size: 14px;
+  }
+  .action-do strong { color: var(--accent); }
+  .action-do code {
+    background: rgba(110,118,129,0.2);
+    color: #ffd38a;
+    border: 1px solid rgba(110,118,129,0.25);
+    padding: 1px 6px;
+    border-radius: 6px;
+  }
+  pre {
+    margin: 10px 0 2px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    overflow-x: auto;
+    background: #0a0f16;
+    border: 1px solid rgba(48,54,61,0.9);
+    color: #dbe5f0;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .tip, .notes {
+    margin-top: 12px;
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .tip {
+    border: 1px solid var(--tip-border);
+    background: var(--tip-bg);
+    color: #c8f5d2;
+    font-size: 13px;
+  }
+  .tip::before {
+    content: '💡 ';
+    font-size: 14px;
+  }
+  .notes {
+    border: 1px solid var(--note-border);
+    background: var(--note-bg);
+    color: #c8d6ea;
+    font-size: 13px;
+  }
+  .notes.hidden { display: none; }
+  .notes-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    color: var(--accent);
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .12em;
+  }
+  .notes blockquote {
+    margin: 0;
+    padding: 10px 14px;
+    border-left: 4px solid rgba(88,166,255,0.75);
+    background: rgba(88,166,255,0.06);
+    border-radius: 0 10px 10px 0;
+    color: var(--text);
+    font-style: italic;
+  }
+
+  .qa-section {
+    margin: 18px 0 40px;
+    border-radius: 18px;
+    border: 1px solid rgba(240,136,62,0.28);
+    background: rgba(22,27,34,0.82);
+    overflow: hidden;
+  }
+  .qa-section.hidden { display: none; }
+  .qa-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    background: linear-gradient(90deg, rgba(240,136,62,0.16), rgba(248,81,73,0.08));
+    color: var(--text);
+    padding: 18px 20px;
+    cursor: pointer;
+  }
+  .qa-toggle:hover { filter: brightness(1.05); }
+  .qa-toggle-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .qa-toggle h3 {
+    margin: 0;
+    font-size: 17px;
+  }
+  .qa-toggle small {
+    color: #f6caa5;
+    display: block;
+    font-size: 12px;
+    margin-top: 2px;
+  }
+  .qa-count {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(13,17,23,0.45);
+    color: #ffddb9;
+    font-size: 12px;
+  }
+  .qa-chevron {
+    font-size: 18px;
+    color: #ffb980;
+  }
+  .qa-panel {
+    padding: 18px;
+    display: grid;
+    gap: 14px;
+  }
+  .qa-panel.collapsed { display: none; }
+  .qa-card {
+    padding: 18px;
+    border-radius: 16px;
+    border: 1px solid var(--qa-border);
+    background: linear-gradient(180deg, rgba(248,81,73,0.06), rgba(240,136,62,0.04));
+    box-shadow: inset 4px 0 0 rgba(240,136,62,0.8);
+  }
+  .qa-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .qa-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    color: #ffceb4;
+  }
+  .qa-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .badge {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .badge.demo {
+    background: rgba(240,136,62,0.18);
+    border-color: rgba(240,136,62,0.4);
+    color: #ffd7b1;
+  }
+  .badge.followup {
+    background: rgba(88,166,255,0.15);
+    border-color: rgba(88,166,255,0.35);
+    color: #dbeafe;
+  }
+  .qa-question {
+    font-size: 18px;
+    line-height: 1.45;
+    font-weight: 800;
+    color: var(--danger-soft);
+    margin: 0;
+  }
+  .qa-answer-grid {
+    display: grid;
+    gap: 12px;
+  }
+  .qa-block {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(13,17,23,0.44);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .qa-block.follow-up {
+    background: rgba(88,166,255,0.08);
+    border-color: rgba(88,166,255,0.2);
+  }
+  .qa-block.demo {
+    background: rgba(240,136,62,0.1);
+    border-color: rgba(240,136,62,0.28);
+  }
+  .qa-block-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-weight: 800;
+    color: #ffcca4;
+  }
+  .qa-block.follow-up .qa-block-title { color: #bfdbfe; }
+  .qa-block p:first-child, .qa-block ul:first-child, .qa-block ol:first-child { margin-top: 0; }
+  .qa-block p:last-child, .qa-block ul:last-child, .qa-block ol:last-child { margin-bottom: 0; }
+  .qa-block ul, .qa-block ol { padding-left: 20px; }
+
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 250;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    background: rgba(0,0,0,0.72);
+    backdrop-filter: blur(10px);
+  }
+  .modal.show { display: flex; }
+  .modal-shell {
+    width: min(1120px, 100%);
+    max-height: min(88vh, 980px);
+    overflow: hidden;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, rgba(88,166,255,0.08), rgba(22,27,34,1));
+  }
+  .modal-header h3 {
+    margin: 0;
+    font-size: 20px;
+  }
+  .modal-header p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .modal-body { overflow: auto; max-height: calc(88vh - 78px); }
+
+  .knowledge-layout {
+    display: grid;
+    grid-template-columns: 290px 1fr;
+    min-height: 580px;
+  }
+  .knowledge-nav {
+    padding: 16px;
+    border-right: 1px solid var(--border);
+    background: rgba(13,17,23,0.55);
+  }
+  .knowledge-nav button {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: 0.15s ease;
+  }
+  .knowledge-nav button:hover {
+    color: var(--text);
+    background: rgba(88,166,255,0.06);
+    border-color: rgba(88,166,255,0.12);
+  }
+  .knowledge-nav button.active {
+    color: var(--text);
+    background: rgba(88,166,255,0.12);
+    border-color: rgba(88,166,255,0.28);
+  }
+  .knowledge-nav .kb-nav-title {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .knowledge-nav .kb-nav-summary {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .knowledge-content {
+    padding: 22px;
+  }
+  .knowledge-card {
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(88,166,255,0.08), rgba(13,17,23,0.25));
+    padding: 22px;
+  }
+  .knowledge-kicker {
+    color: var(--accent);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .14em;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .knowledge-card h4 {
+    margin: 0 0 8px;
+    font-size: 26px;
+  }
+  .knowledge-summary {
+    margin: 0 0 18px;
+    font-size: 15px;
+    color: #d0d7de;
+  }
+  .knowledge-body {
+    display: grid;
+    gap: 14px;
+  }
+  .knowledge-body p,
+  .knowledge-body ul,
+  .knowledge-body ol,
+  .knowledge-body table,
+  .knowledge-body .knowledge-callout { margin: 0; }
+  .knowledge-body ul, .knowledge-body ol { padding-left: 20px; }
+  .knowledge-body table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .knowledge-body th,
+  .knowledge-body td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid rgba(48,54,61,0.7);
+    vertical-align: top;
+  }
+  .knowledge-body th:last-child,
+  .knowledge-body td:last-child { border-right: 0; }
+  .knowledge-body th {
+    background: rgba(88,166,255,0.12);
+    text-align: left;
+  }
+  .knowledge-callout {
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(88,166,255,0.24);
+    background: rgba(88,166,255,0.08);
+  }
+
+  .shortcuts-grid {
+    padding: 20px 22px 22px;
+    display: grid;
+    gap: 10px;
+  }
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(48,54,61,0.65);
+  }
+  .shortcut-row:last-child { border-bottom: 0; }
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 13px;
+  }
+
+  .kb-fab {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 110;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(88,166,255,0.32);
+    background: rgba(22,27,34,0.94);
+    color: var(--text);
+    padding: 12px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .kb-fab:hover { background: #1d2430; }
+
+  .hidden { display: none !important; }
+
+  @media (max-width: 1080px) {
+    .topbar {
+      height: auto;
+      min-height: 64px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+    }
+    .progress-track { top: 88px; }
+    .sidebar { top: 92px; }
+    main { padding-top: 126px; }
+  }
+  @media (max-width: 980px) {
+    .sidebar { display: none; }
+    main { margin-left: 0; padding: 110px 18px 88px; }
+    .knowledge-layout { grid-template-columns: 1fr; }
+    .knowledge-nav { border-right: 0; border-bottom: 1px solid var(--border); }
+  }
+  @media (max-width: 760px) {
+    .topbar { gap: 10px; }
+    .topbar .controls { width: 100%; }
+    .step-head {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        'num title'
+        'screen status';
+    }
+    .step-num { grid-area: num; }
+    .step-title-block { grid-area: title; }
+    .step-screen { grid-area: screen; justify-self: start; }
+    .step-status { grid-area: status; justify-self: end; }
+    .kb-fab span:last-child { display: none; }
+  }
+  @media print {
+    .topbar, .progress-track, .sidebar, .kb-fab, .modal { display: none !important; }
+    main { margin: 0; padding: 24px; }
+    .notes.hidden, .qa-section.hidden { display: block !important; }
+    .qa-panel.collapsed { display: grid !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo-block">
+      <div class="logo">🚀 Fabric CI/CD Demo <span>— Digital Realty</span></div>
+      <div class="tagline">Second-monitor guide for the 60-minute live presentation</div>
+    </div>
+    <div class="timer-pill">
+      <div class="timer" id="timer">00:00</div>
+      <button class="btn primary" id="timerBtn" onclick="toggleTimer()">▶ Start Timer</button>
+    </div>
+    <div class="controls">
+      <button class="btn active" id="notesBtn" onclick="toggleNotes()">📝 Notes ON</button>
+      <button class="btn warn active" id="qaBtn" onclick="toggleQA()">❓ Q&amp;A ON</button>
+      <button class="btn" onclick="toggleShortcuts(true)">⌨ Shortcuts</button>
+      <button class="btn" onclick="resetAll()">↺ Reset</button>
+    </div>
+  </div>
+
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+
+  <nav class="sidebar" id="sidebar"></nav>
+  <main id="main"></main>
+
+  <button class="kb-fab" onclick="openKnowledgeBase()" title="Open knowledge base">
+    <span>📚</span>
+    <span>Knowledge Base</span>
+  </button>
+
+  <div class="modal" id="knowledgeModal" onclick="if (event.target === this) closeKnowledgeBase()">
+    <div class="modal-shell">
+      <div class="modal-header">
+        <div>
+          <h3>📚 Fabric Knowledge Base</h3>
+          <p>Rapid concept explainers for customer questions and schema-gap conversations.</p>
+        </div>
+        <button class="btn" onclick="closeKnowledgeBase()">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="knowledge-layout">
+          <div class="knowledge-nav" id="knowledgeNav"></div>
+          <div class="knowledge-content" id="knowledgeContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="shortcutsModal" onclick="if (event.target === this) toggleShortcuts(false)">
+    <div class="modal-shell" style="width:min(560px,100%);">
+      <div class="modal-header">
+        <div>
+          <h3>⌨ Keyboard Shortcuts</h3>
+          <p>Designed for fast presenter control without touching the mouse.</p>
+        </div>
+        <button class="btn" onclick="toggleShortcuts(false)">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="shortcuts-grid">
+          <div class="shortcut-row"><span>Next step</span><span><kbd>→</kbd></span></div>
+          <div class="shortcut-row"><span>Previous step</span><span><kbd>←</kbd></span></div>
+          <div class="shortcut-row"><span>Toggle notes</span><span><kbd>H</kbd></span></div>
+          <div class="shortcut-row"><span>Toggle Q&amp;A sections</span><span><kbd>Q</kbd></span></div>
+          <div class="shortcut-row"><span>Start / pause timer</span><span><kbd>T</kbd></span></div>
+          <div class="shortcut-row"><span>Mark current step done</span><span><kbd>D</kbd></span></div>
+          <div class="shortcut-row"><span>Open knowledge base</span><span><kbd>K</kbd></span></div>
+          <div class="shortcut-row"><span>Close modals</span><span><kbd>Esc</kbd></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const STORAGE_KEY = 'fabric-demo-guide-v2';
+const KNOWLEDGE_BASE = [
+  {
+    "id": "fabric",
+    "title": "What is Microsoft Fabric?",
+    "summary": "Fabric unifies analytics, engineering, BI, and governance into one SaaS platform.",
+    "contentHtml": "<p>Microsoft Fabric is a unified analytics platform that brings together data engineering, data science, real-time analytics, data warehousing, and business intelligence into a single SaaS product.</p><p>It's built on OneLake (a single data lake for the entire organization) and uses a shared capacity model. Think of it as Azure Synapse + Power BI + Data Factory + Data Activator all unified under one roof with a single security model, billing model, and governance layer.</p>"
+  },
+  {
+    "id": "lakehouse",
+    "title": "What is a Lakehouse?",
+    "summary": "A Lakehouse combines open data-lake storage with warehouse-style analytics access.",
+    "contentHtml": "<p>A Lakehouse combines the best of data lakes and data warehouses. It stores data as Delta Lake files in OneLake (like a data lake) but provides a SQL analytics endpoint for querying (like a warehouse).</p><ul><li><strong>Storage:</strong> Delta Parquet files in OneLake</li><li><strong>Compute:</strong> Apache Spark for data engineering, SQL endpoint for analytics</li><li><strong>Schema:</strong> Schema-on-read (flexible) + schema enforcement via Delta Lake</li><li><strong>Format:</strong> Open Delta Lake format (no vendor lock-in)</li><li><strong>Access:</strong> Notebooks (PySpark/Scala/SQL), SQL endpoint (T-SQL read-only), Power BI (Direct Lake mode)</li><li><strong>Use cases:</strong> Data engineering, ETL/ELT pipelines, data science, machine learning, medallion architecture (bronze/silver/gold)</li></ul>"
+  },
+  {
+    "id": "delta-lake",
+    "title": "What is Delta Lake?",
+    "summary": "Delta Lake is the transaction layer that gives Fabric Lakehouses reliability and history.",
+    "contentHtml": "<p>Delta Lake is an open-source storage layer that brings ACID transactions to data lakes. Every table in a Fabric Lakehouse is a Delta table.</p><ul><li><strong>ACID Transactions:</strong> Atomicity, Consistency, Isolation, Durability — no partial writes</li><li><strong>Schema Enforcement:</strong> Rejects writes that don't match the schema</li><li><strong>Schema Evolution:</strong> Can add new columns with <code>mergeSchema</code> option</li><li><strong>Time Travel:</strong> Query any previous version of the data (up to retention period)</li><li><strong>Audit History:</strong> Full transaction log (<code>_delta_log</code>) records every change</li><li><strong>Optimized Writes:</strong> Auto-compaction, Z-ordering, V-ordering for performance</li></ul>"
+  },
+  {
+    "id": "lakehouse-vs-warehouse",
+    "title": "Lakehouse vs Warehouse in Fabric",
+    "summary": "Use the right engine for the right layer — and mix both when needed.",
+    "contentHtml": "<table><thead><tr><th>Aspect</th><th>Lakehouse</th><th>Warehouse</th></tr></thead><tbody><tr><td>Data format</td><td>Delta Lake (open Parquet)</td><td>Proprietary database pages</td></tr><tr><td>Write access</td><td>Spark notebooks, Dataflows</td><td>Full T-SQL DML (INSERT/UPDATE/DELETE)</td></tr><tr><td>SQL access</td><td>Read-only SQL endpoint</td><td>Full read-write T-SQL</td></tr><tr><td>Git integration (schemas)</td><td>Container metadata only ❌</td><td>Full object-level (tables, views, procs) ✅</td></tr><tr><td>Best for</td><td>Data engineering, ML, raw data</td><td>BI reporting, curated data, SQL workloads</td></tr><tr><td>Data types</td><td>Structured + semi-structured + unstructured</td><td>Structured only</td></tr><tr><td>Power BI mode</td><td>Direct Lake (fastest)</td><td>DirectQuery or Import</td></tr><tr><td>Multi-table transactions</td><td>No</td><td>Yes</td></tr><tr><td>Cross-database queries</td><td>No</td><td>Yes</td></tr></tbody></table><div class=\"knowledge-callout\"><strong>Key insight for this demo:</strong> Warehouse has full Git integration for schemas. If the customer needs native schema versioning, Warehouse is the better fit for that specific layer. Many enterprises use BOTH: Lakehouse for data engineering (bronze/silver) and Warehouse for curated serving (gold layer).</div>"
+  },
+  {
+    "id": "workspace",
+    "title": "What is a Fabric Workspace?",
+    "summary": "A workspace is the environment boundary for security, capacity, Git, and item organization.",
+    "contentHtml": "<p>A workspace is a logical container in Fabric that holds related items (Lakehouses, Warehouses, notebooks, pipelines, reports). Think of it as a <em>project folder</em> with:</p><ul><li><strong>Access control:</strong> Role-based (Admin, Member, Contributor, Viewer)</li><li><strong>Capacity binding:</strong> Each workspace is assigned to a Fabric capacity</li><li><strong>Git integration:</strong> Each workspace can connect to a Git branch</li><li><strong>Environment mapping:</strong> Dev workspace → dev branch, UAT workspace → uat branch, etc.</li></ul>"
+  },
+  {
+    "id": "deployment-pipelines",
+    "title": "What are Deployment Pipelines?",
+    "summary": "Deployment Pipelines promote supported Fabric artifacts between isolated workspaces.",
+    "contentHtml": "<p>Fabric Deployment Pipelines are a built-in feature for promoting artifacts between workspaces (typically Dev → Test → Prod).</p><ul><li>Compare artifacts between stages and show differences</li><li>Deploy changed artifacts with one click or via API</li><li>Support deployment rules for environment-specific config (connection strings, parameters)</li><li>Do <strong>NOT</strong> deploy data or table schemas — only artifact definitions</li><li>Require Premium/Fabric capacity (F64+ or Trial)</li></ul>"
+  },
+  {
+    "id": "git-integration",
+    "title": "What is Git Integration in Fabric?",
+    "summary": "Git integration serializes supported Fabric items into source control for branching and review.",
+    "contentHtml": "<p>Fabric workspaces can connect to Azure DevOps or GitHub repositories. When connected:</p><ul><li>Artifacts are serialized to JSON/definition files in the repo</li><li>Changes can be committed from workspace → Git</li><li>Updates can be pulled from Git → workspace</li><li>Enables branch-based development, code review via PRs, and version history</li><li><strong>Limitation:</strong> Only artifact definitions are tracked, <strong>NOT</strong> data or Lakehouse table schemas</li></ul>"
+  },
+  {
+    "id": "onelake",
+    "title": "What is OneLake?",
+    "summary": "OneLake is Fabric's shared storage foundation — one lake, many engines.",
+    "contentHtml": "<p>OneLake is Fabric's unified data lake — a single storage layer for the entire organization. Think <em>OneDrive for data.</em> Every Fabric item stores its data in OneLake.</p><ul><li>Single namespace across the org</li><li>Data stored once, accessed by all engines (Spark, SQL, Power BI)</li><li>Supports shortcuts to external data (ADLS, S3, GCS) without copying</li><li>Delta Lake format by default</li><li>Governed by workspace-level and item-level security</li></ul>"
+  }
+];
+const QA_BY_PART = {
+  "1": [
+    {
+      "id": "Q1",
+      "question": "You said Lakehouse table schemas are not tracked by Git. What EXACTLY does Git track for a Lakehouse?",
+      "answerHtml": "<p>Git tracks only the Lakehouse container metadata. Specifically:</p><ul><li>Display name and logical ID (GUID) of the Lakehouse</li><li>OneLake shortcut definitions (if any)</li><li>Data Access Roles (preview feature) — the security configuration</li><li>Default <code>dbo</code> schema container metadata</li></ul><p>That's it. The actual <code>CREATE TABLE</code> statements, column definitions, data types, views, stored procedures, functions — <strong>NONE</strong> of that is serialized. When you look in Git, you'll see a folder with a few JSON files — <code>.platform</code>, <code>lakehouse.metadata.json</code>, maybe <code>data-access-roles.json</code>. But no DDL.</p>",
+      "impactHtml": "<p>This means if someone creates 50 tables in Dev via the SQL endpoint, commits to Git, and deploys to UAT — UAT gets an empty Lakehouse with the same name but zero tables.</p>",
+      "demoHtml": "<p><strong>Want me to show you?</strong> Let me create a table right now and check Git. That is exactly what Part 4 demonstrates.</p>"
+    },
+    {
+      "id": "Q2",
+      "question": "Why doesn't Microsoft just track table schemas in Git like they do for Warehouse?",
+      "answerHtml": "<p>It's an architectural difference. A Warehouse stores objects as SQL metadata (like SQL Server) — tables, views, and procs are first-class database objects that can be extracted as DDL scripts. A Lakehouse stores data as Delta Lake files in OneLake — the <em>schema</em> is embedded in the Delta transaction log (<code>_delta_log</code> folder) inside each table's folder, not in a central metadata catalog.</p><p>Extracting and serializing those Delta logs into a Git-friendly format is technically more complex. Microsoft has acknowledged this gap and it's on their roadmap. In the meantime, Schema-as-Code is the recommended pattern.</p>",
+      "followUpHtml": "<p><strong>Should we switch to Warehouse then?</strong> Not necessarily. Lakehouse gives you Direct Lake mode for Power BI (fastest query performance), flexible schema evolution, Spark processing, and support for semi-structured data. Many enterprises use <strong>BOTH</strong>: Lakehouse for data engineering (bronze/silver layers) and Warehouse for curated serving (gold layer) where Git integration gives you full schema tracking.</p>"
+    },
+    {
+      "id": "Q3",
+      "question": "What is the medallion architecture and how does this fit in?",
+      "answerHtml": "<p>The medallion architecture organizes data into three layers:</p><ul><li><strong>Bronze (Raw):</strong> Raw data as ingested — minimal transformation, full fidelity</li><li><strong>Silver (Cleansed):</strong> Cleaned, validated, conformed data — deduped, typed, joined</li><li><strong>Gold (Curated):</strong> Business-ready aggregations, KPIs, reporting tables</li></ul><p>In Fabric, you might use a Lakehouse for Bronze and Silver (where flexible schema and Spark processing shine) and either a Lakehouse or Warehouse for Gold (where SQL access and BI reporting matter most). The Schema-as-Code approach applies at every layer — you want every table creation versioned regardless of the layer.</p>"
+    },
+    {
+      "id": "Q4",
+      "question": "What about data governance? If schemas aren't tracked, how do we ensure compliance?",
+      "answerHtml": "<p>This is a critical concern. Without schema tracking:</p><ul><li>No audit trail for who created or modified a table and when (unless you check Delta history manually)</li><li>No code review process for schema changes (someone can <code>ALTER TABLE</code> in the UI without approval)</li><li>No way to enforce naming conventions or standards through PR reviews</li><li>No rollback capability through Git — you'd have to manually write a reversal script</li></ul><p>Schema-as-Code solves all of these: every change goes through a Git PR, gets reviewed, has an audit trail, and can be rolled back by reverting the commit.</p>"
+    }
+  ],
+  "2": [
+    {
+      "id": "Q5",
+      "question": "Why 3 separate workspaces instead of using branches in one workspace?",
+      "answerHtml": "<p>Fabric workspaces are the isolation boundary. Each workspace:</p><ul><li>Has its own compute resources (Spark sessions, SQL endpoint)</li><li>Has independent access controls (different people can access Dev vs Prod)</li><li>Can connect to different data sources (Dev database vs Prod database)</li><li>Has its own Lakehouse with its own OneLake storage</li></ul><p>Using branches in one workspace doesn't give you this isolation. The pattern is: one workspace per environment, each connected to a different Git branch (main → Dev, release → UAT, production → Prod). Deployment Pipelines handle the promotion between workspaces.</p>"
+    },
+    {
+      "id": "Q6",
+      "question": "What's the difference between Deployment Pipelines and Git-based CI/CD? Do we need both?",
+      "answerHtml": "<p>They serve different purposes and complement each other:</p><ul><li><strong>Deployment Pipelines:</strong> Promote Fabric-native artifacts (notebooks, pipelines, reports, semantic models) between workspaces. Visual, one-click. Handles environment-specific configuration rules. But does <strong>NOT</strong> handle table schemas or data.</li><li><strong>Git-based CI/CD:</strong> Handles everything that Deployment Pipelines can't — schema migrations, data seeding, custom validations, approval gates, notifications. Code-centric, scriptable, auditable.</li></ul><p>Best practice: use <strong>BOTH</strong>. Deployment Pipelines for standard artifacts. Git-based CI/CD (with Schema-as-Code) for Lakehouse schemas. They're not competing — they're complementary.</p>"
+    },
+    {
+      "id": "Q7",
+      "question": "How do you handle data isolation between environments? Dev shouldn't have production data.",
+      "answerHtml": "<p>Each workspace has its own Lakehouse with its own OneLake storage. Data is physically separate. For Dev, you'd typically:</p><ol><li>Use synthetic or anonymized data (generate via notebooks or import sample CSVs)</li><li>Use OneLake shortcuts to reference a subset of production data (read-only, no copy)</li><li>Use Data Pipelines to copy and mask production data into Dev</li></ol><p>The Schema-as-Code approach handles the structure; data population is a separate concern handled by data pipelines or seeding scripts.</p>"
+    },
+    {
+      "id": "Q8",
+      "question": "Can we use Fabric capacities to isolate environments? What about cost?",
+      "answerHtml": "<p>Yes. Each workspace is bound to a capacity. Options:</p><ul><li><strong>Shared capacity:</strong> All workspaces on one Fabric capacity (cheapest, but Dev load can impact Prod performance)</li><li><strong>Separate capacities:</strong> Dev on F2, UAT on F4, Prod on F64 (best isolation, higher cost)</li><li><strong>Trial capacity:</strong> What we're using today — free but limited and temporary</li></ul><p>For production workloads, separate capacities (or at least Dev/Test on one, Prod on another) is recommended.</p>"
+    }
+  ],
+  "3": [
+    {
+      "id": "Q9",
+      "question": "What happens if two developers commit to Git at the same time? How are conflicts handled?",
+      "answerHtml": "<p>Fabric uses a workspace-level lock. Only one user can commit at a time from a workspace. If there's a conflict (someone else committed first), you'll get a merge conflict notification and need to resolve it — similar to any Git workflow.</p><p>Best practices:</p><ul><li>Use feature branches: each developer works in their own branch or workspace</li><li>Merge to main via Pull Requests with reviews</li><li>Sync workspace from Git regularly to stay current</li></ul><p>Currently, Fabric doesn't have great merge conflict resolution UX — so the PR-based workflow is strongly recommended.</p>"
+    },
+    {
+      "id": "Q10",
+      "question": "What specific artifacts does Git integration serialize? Give me the full list.",
+      "answerHtml": "<p>As of the current Fabric release, Git serialization is supported (GA) for:</p><p>✅ Notebooks, Data Pipelines, Spark Job Definitions, Spark Environment<br>✅ Semantic Models (Power BI datasets), Reports, Paginated Reports<br>✅ Warehouses (full object-level: tables, views, procs, functions)<br>✅ Lakehouses (container metadata only — NOT tables or views)<br>✅ Dataflows Gen2, ML Models, ML Experiments</p><p>❌ Lakehouse table schemas, views, stored procedures<br>❌ Real-time dashboards, Eventstreams<br>❌ KQL databases, KQL querysets<br>❌ Data Activator reflexes</p><p>The key takeaway: <strong>Warehouse = full schema tracking. Lakehouse = container only.</strong></p>"
+    }
+  ],
+  "4": [
+    {
+      "id": "Q11",
+      "question": "This is a serious gap. Is Microsoft going to fix this? What's on the roadmap?",
+      "answerHtml": "<p>Microsoft has acknowledged this limitation. The Fabric product team is actively working on improved Git integration for Lakehouse. However, there's no confirmed timeline for full Lakehouse schema serialization.</p><p>In the meantime, Schema-as-Code is the officially recommended workaround. It's worth noting that this pattern (database migrations managed as code) is industry-standard — tools like Flyway, Liquibase, Django migrations, and Entity Framework migrations have been doing this for years. So it's not a hack — it's a proven pattern applied to Fabric.</p>"
+    },
+    {
+      "id": "Q12",
+      "question": "What if someone creates tables through the UI and we can't control that? How do we detect schema drift?",
+      "answerHtml": "<p>Great question. You need a drift detection mechanism:</p><ol><li><strong>Automated detection notebook:</strong> Write a notebook that runs nightly, queries <code>INFORMATION_SCHEMA.TABLES</code> and <code>INFORMATION_SCHEMA.COLUMNS</code> from each Lakehouse SQL endpoint, and compares against the migration scripts in Git. Any table that exists in the Lakehouse but <strong>NOT</strong> in the migration scripts = unauthorized drift.</li><li><strong>Alerting:</strong> The notebook sends an alert (email, Teams message, or Azure Monitor alert) when drift is detected.</li><li><strong>Policy:</strong> Establish a policy that <strong>ALL</strong> schema changes must go through migration scripts. UI-created tables found by the drift detector must be formalized into a new migration script before the next release.</li><li><strong>Access control:</strong> Restrict SQL endpoint write access in UAT and Prod workspaces so only the CI/CD service principal can make schema changes.</li></ol>",
+      "demoHtml": "<p><strong>DEMO-WORTHY:</strong> Should I show you what a drift detection query looks like? A quick query against <code>INFORMATION_SCHEMA</code> is a great live follow-up.</p>"
+    },
+    {
+      "id": "Q13",
+      "question": "What about views, stored procedures, and functions in the Lakehouse? Are those tracked?",
+      "answerHtml": "<p>No. Spark views created via <code>CREATE VIEW</code> in the SQL endpoint are <strong>NOT</strong> tracked by Git. They exist only in the Lakehouse's SQL endpoint metadata. Stored procedures and functions are also not tracked.</p><p>For views, include them in your migration scripts alongside tables. For complex logic, consider using notebooks (which <strong>ARE</strong> tracked by Git) instead of stored procedures.</p>"
+    },
+    {
+      "id": "Q14",
+      "question": "What's the real-world impact of this gap? Give me a horror scenario.",
+      "answerHtml": "<p>Here's a real scenario we've seen:</p><ol><li>Dev team creates 30 tables in Dev Lakehouse over 2 months</li><li>They commit notebooks and pipelines to Git regularly — everything looks clean</li><li>Release day: they deploy to UAT via Deployment Pipeline</li><li>UAT gets all the notebooks and pipelines — but <strong>ZERO</strong> tables</li><li>Every notebook fails immediately because the tables they reference don't exist</li><li>Team spends 3 days manually recreating tables in UAT by running notebooks one-by-one</li><li>They repeat this process for Prod</li><li>A month later, someone adds a column in Dev but forgets to add it in Prod</li><li>Production pipeline breaks on a Saturday at 2 AM</li></ol><p>Schema-as-Code prevents <strong>all</strong> of this.</p>"
+    }
+  ],
+  "5": [
+    {
+      "id": "Q15",
+      "question": "How do you handle rollbacks? What if a migration breaks something?",
+      "answerHtml": "<p>Multiple strategies:</p><ol><li><strong>Delta Lake Time Travel:</strong> Before running migrations, note the current table version. If something goes wrong, use <code>RESTORE TABLE table_name TO VERSION AS OF X</code> to rollback.</li><li><strong>Down migrations:</strong> Write a corresponding <em>undo</em> script for each migration (for example <code>v002_down.sql</code> that drops the tables or columns added by <code>v002</code>). The migration runner can support a <code>rollback</code> mode.</li><li><strong>Git revert:</strong> Revert the migration commit in Git and redeploy. The migration runner sees the state hasn't changed and does nothing (or runs the down migration if implemented).</li><li><strong>Forward-fix:</strong> Often the fastest approach — write a <code>v003</code> migration that fixes whatever <code>v002</code> broke, and deploy that.</li></ol><p>Best practice: always test migrations in Dev first, then UAT, with automated data quality checks after each step.</p>"
+    },
+    {
+      "id": "Q16",
+      "question": "What about data migrations? Not just schema but actual data movement?",
+      "answerHtml": "<p>Schema-as-Code handles structure. For data:</p><ul><li><strong>Seed data:</strong> Include <code>INSERT</code> statements or PySpark data generation in your migration scripts for reference or lookup tables</li><li><strong>Data backfill:</strong> When adding a new column, include an <code>UPDATE</code> statement to populate existing rows</li><li><strong>Large data loads:</strong> Use separate Data Pipelines (which <strong>ARE</strong> tracked by Git) for ETL/ELT</li><li><strong>Data masking for Dev/UAT:</strong> Separate concern — use Data Pipelines with masking transformations</li></ul><p>The migration runner can handle both DDL and DML, but keep large data loads in dedicated pipelines.</p>"
+    },
+    {
+      "id": "Q17",
+      "question": "How do you handle dependencies between tables? What if table B has a foreign key on table A?",
+      "answerHtml": "<p>Migration scripts run in version order (<code>v001</code>, <code>v002</code>, <code>v003</code>...). Within each script, order your <code>CREATE TABLE</code> statements so that parent tables are created before child tables.</p><p>Delta Lake in Fabric doesn't enforce foreign keys at the engine level (it's not like SQL Server), but maintaining the logical order is still important for:</p><ul><li>Data quality checks that validate referential integrity</li><li>Downstream notebooks and reports that expect certain tables to exist</li><li>Documentation and team understanding of the data model</li></ul>"
+    },
+    {
+      "id": "Q18",
+      "question": "Can we unit test our migration scripts before deploying?",
+      "answerHtml": "<p>Yes. The CI/CD pipeline should include a validation stage:</p><ol><li><strong>Syntax check:</strong> Parse the SQL or PySpark scripts for syntax errors before deployment</li><li><strong>Dry-run in Dev:</strong> Apply migrations to Dev first and run data quality checks</li><li><strong>Schema comparison:</strong> After migration, compare the resulting schema against an expected schema definition</li><li><strong>Automated testing notebook:</strong> The <code>data_quality_checks.py</code> notebook validates table existence, column types, row counts, and null checks</li></ol><p>This is what the <strong>Validate</strong> stage in our Azure DevOps pipeline does.</p>"
+    }
+  ],
+  "6": [
+    {
+      "id": "Q19",
+      "question": "What are the Fabric REST API rate limits? Will our automation hit throttling?",
+      "answerHtml": "<p>Fabric REST APIs have throttling limits:</p><ul><li>Most endpoints: 200 requests per minute per principal</li><li>Long-running operations (notebook execution): use the polling pattern with the <code>Location</code> header</li><li>Best practices: implement exponential backoff, use batch operations where available, cache workspace and item IDs</li></ul><p>For a typical CI/CD pipeline running 3-4 API calls per deployment, throttling is rarely an issue. It becomes relevant if you're running migrations against 50+ workspaces simultaneously.</p>"
+    },
+    {
+      "id": "Q20",
+      "question": "How do you handle authentication securely? We can't have secrets in pipelines.",
+      "answerHtml": "<p>Use managed identities or service principals with Azure Key Vault:</p><ol><li><strong>Service Principal:</strong> Register in Entra ID, store client secret in Azure Key Vault</li><li><strong>Pipeline integration:</strong> Azure DevOps or GitHub Actions retrieve the secret from Key Vault at runtime — never hardcoded</li><li><strong>Fabric permissions:</strong> Grant the service principal <strong>Contributor</strong> role on each workspace</li><li><strong>Token scoping:</strong> Request tokens scoped to <code>https://api.fabric.microsoft.com/.default</code></li><li><strong>Rotation:</strong> Automate secret rotation via Key Vault policies</li></ol><p>Alternative: use Workload Identity Federation (OIDC) with GitHub Actions — no secrets needed at all, just a trust relationship between GitHub and Entra ID.</p>"
+    },
+    {
+      "id": "Q21",
+      "question": "Can we monitor migration status and get alerts on failures?",
+      "answerHtml": "<p>Yes, build observability into the pipeline:</p><ol><li><strong>Pipeline notifications:</strong> Azure DevOps or GitHub Actions can send emails, Teams messages, or Slack alerts on failure</li><li><strong>Migration history table:</strong> The <code>_migration_history</code> Delta table records every migration with timestamp, status, and duration</li><li><strong>Azure Monitor:</strong> Send custom metrics or logs to Azure Monitor for centralized alerting</li><li><strong>Dashboard:</strong> Build a Power BI report on top of the migration history tables across all environments — see migration status at a glance</li></ol>"
+    }
+  ],
+  "7": [
+    {
+      "id": "Q22",
+      "question": "If you had to recommend ONE approach — Lakehouse or Warehouse — for our CI/CD scenario, which would it be?",
+      "answerHtml": "<p>It depends on your workload:</p><ul><li>If your primary need is <strong>BI reporting</strong> with full SQL support and native Git schema tracking → <strong>Warehouse</strong></li><li>If you need <strong>data engineering</strong> with Spark, semi-structured data, ML, and Direct Lake mode for Power BI → <strong>Lakehouse</strong> (with Schema-as-Code for CI/CD)</li><li><strong>Best practice:</strong> use <strong>BOTH</strong> in a medallion architecture — Lakehouse for Bronze/Silver (data engineering), Warehouse for Gold (reporting/serving). This gives you the best of both worlds.</li></ul>"
+    },
+    {
+      "id": "Q23",
+      "question": "How long would it take us to implement this Schema-as-Code approach in our environment?",
+      "answerHtml": "<p>For a team that already has Fabric workspaces and a Git repo:</p><ul><li>Setting up migration scripts for existing tables: 1-2 days (extract current DDL, organize into versioned files)</li><li>Building the migration runner notebook: already done — use the one we showed today</li><li>Setting up the CI/CD pipeline: 1 day (adapt our Azure DevOps or GitHub Actions template)</li><li>Testing end-to-end: 1-2 days</li><li><strong>Total:</strong> about 1 week for initial setup, then it's just maintaining migration scripts as part of normal development</li></ul>"
+    },
+    {
+      "id": "Q24",
+      "question": "What about the fabric-cicd Python library? Should we use that instead?",
+      "answerHtml": "<p>The <code>fabric-cicd</code> Python library (open source from Microsoft) is great for deploying Fabric items programmatically. It handles item serialization, deployment, and parameterization.</p><p>However, it doesn't solve the Lakehouse schema gap — it deploys artifact definitions, not table schemas. You can use it alongside Schema-as-Code: <code>fabric-cicd</code> for deploying notebooks or pipelines + Schema-as-Code for deploying table schemas. They complement each other.</p>"
+    }
+  ]
+};
+const DEMO = [
+  // ─── PART 1: SLIDES ───
+  {
+    part: 1, partTitle: "Slides — Context & Problem", duration: "10 min",
+    goal: "Set the context. Explain the problem before showing the solution. Keep the audience engaged with visuals.",
+    steps: [
+      {
+        id: "1.1", title: "Slide 1 — SDLC Overview",
+        screen: "PowerPoint",
+        actions: [
+          "Open <strong>Fabric_CICD_Demo.pptx</strong> from the <code>presentation</code> folder",
+          "Press <strong>F5</strong> to start the slideshow (full screen)",
+          "Show <strong>Slide 1</strong> — the architecture diagram with Dev → UAT → Prod workspaces"
+        ],
+        notes: `<blockquote>"Microsoft Fabric provides a unified analytics platform. For SDLC, we use:<br>
+          • <strong>Workspaces</strong> as our environments (Dev, UAT, Prod)<br>
+          • <strong>Git integration</strong> to version-control our artifacts<br>
+          • <strong>Deployment Pipelines</strong> to promote changes across environments<br>
+          Let me show you how these pieces fit together."</blockquote>`,
+        tips: ["Pause after each bullet point. Let them absorb.", "Make eye contact while showing the slide — don't read verbatim."]
+      },
+      {
+        id: "1.2", title: "Slide 2 — Your Live Environments",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> (right arrow) to advance to Slide 2",
+          "Point to the <strong>3 workspace screenshots</strong> — these are real screenshots from their own tenant",
+          "Highlight that each workspace has a <strong>DataCenterLakehouse</strong>"
+        ],
+        notes: `<blockquote>"These are the actual environments I set up for this demo. Each workspace mirrors your Dev, UAT, and Prod. They all have the same DataCenterLakehouse — but right now, they're empty shells."</blockquote>`,
+        tips: ["The screenshots are real — mention this! It builds credibility."]
+      },
+      {
+        id: "1.3", title: "Slide 3 — What Git Tracks",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> to advance to Slide 3",
+          "Point to the <strong>✅ Tracked</strong> column — notebooks, pipelines, semantic models, reports",
+          "Point to the <strong>❌ Not Tracked</strong> column — Lakehouse tables, views, schemas, stored procedures"
+        ],
+        notes: `<blockquote>"Git integration works great for most artifacts — notebooks, data pipelines, semantic models, reports. But there's an important gap: Lakehouse table definitions, schemas, and views are NOT tracked. Only the Lakehouse container metadata is serialized."</blockquote>`,
+        tips: ["This is the 'aha' moment. Pause after saying 'NOT tracked' — let it sink in."]
+      },
+      {
+        id: "1.4", title: "Slide 4 — The Schema Gap",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> to advance to Slide 4",
+          "Walk through the visual: Dev Lakehouse has tables → Git captures NO tables → UAT gets empty Lakehouse",
+          "Emphasize: <strong>This is the exact problem you're facing</strong>"
+        ],
+        notes: `<blockquote>"Here's the problem you described to us. When someone creates a table in the Dev Lakehouse — through the UI or SQL endpoint — that change stays in Dev only. Git doesn't capture it. Deployment Pipelines don't propagate it. The result is schema drift: your environments get out of sync."</blockquote>`,
+        tips: ["Reference their original email here — show you listened.", "Use the word 'drift' — it resonates with ops teams."]
+      },
+      {
+        id: "1.5", title: "Slide 5 — Schema-as-Code Solution",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> to advance to Slide 5",
+          "Show the solution architecture: Migration scripts in Git → CI/CD pipeline → Fabric notebook → Lakehouse"
+        ],
+        notes: `<blockquote>"The recommended approach is Schema-as-Code. We write migration scripts — SQL or PySpark — that define our table structures. These scripts live in Git. Our CI/CD pipeline runs these scripts against each environment. Combined with Deployment Pipelines for other artifacts, we get full coverage."</blockquote>`,
+        tips: ["Don't rush this slide — it's the solution reveal.", "Say: 'This is what the product team recommends.'"]
+      },
+      {
+        id: "1.6", title: "Slide 6 — Deployment Pipeline (Live)",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> to advance to Slide 6",
+          "Show the <strong>real screenshot</strong> of the DigitalRealty-Pipeline with all 3 stages assigned"
+        ],
+        notes: `<blockquote>"This is the actual Deployment Pipeline I created in your tenant. Dev → Test → Production, all linked to the correct workspaces. This handles the standard artifact promotion. For schemas, we add the migration layer on top."</blockquote>`,
+        tips: []
+      },
+      {
+        id: "1.7", title: "Slide 7 — Demo Roadmap",
+        screen: "PowerPoint",
+        actions: [
+          "Press <strong>→</strong> to advance to Slide 7",
+          "Read through the roadmap so they know what's coming",
+          "Press <strong>Esc</strong> to exit slideshow when done"
+        ],
+        notes: `<blockquote>"Let me show you this working end-to-end. We'll walk through: 1) The environment setup, 2) Standard Git CI/CD, 3) The Lakehouse gap — the problem, 4) Schema-as-Code — the solution, 5) REST API automation. Let's switch to the live environment."</blockquote>`,
+        tips: ["Good transition moment. Take a sip of water.", "Switch your browser to the Fabric tab now."]
+      }
+    ]
+  },
+
+  // ─── PART 2: ENVIRONMENT TOUR ───
+  {
+    part: 2, partTitle: "Live — Environment Tour", duration: "8 min",
+    goal: "Walk them through the actual Fabric environments you set up. Build confidence that this is real, not slides.",
+    steps: [
+      {
+        id: "2.1", title: "Show Fabric Workspaces",
+        screen: "Fabric Portal",
+        actions: [
+          "Open your browser with <strong>https://app.fabric.microsoft.com</strong>",
+          "Click <strong>Workspaces</strong> in the left sidebar",
+          "Click <strong>DigitalRealty-Dev</strong> — show the DataCenterLakehouse inside",
+          "Click <strong>← Back</strong> → click <strong>DigitalRealty-UAT</strong> — show it's the same structure",
+          "Click <strong>← Back</strong> → click <strong>DigitalRealty-Prod</strong> — show it's the same"
+        ],
+        notes: `<blockquote>"We have 3 workspaces mirroring your environments — Dev, UAT, and Prod. Each has a DataCenterLakehouse. Right now they're empty — no tables yet. That's intentional. We'll create schemas through code."</blockquote>`,
+        tips: ["Zoom browser to 125% so the audience can read text easily.", "Collapse side panes if they clutter the view."]
+      },
+      {
+        id: "2.2", title: "Show the Deployment Pipeline",
+        screen: "Fabric Portal",
+        actions: [
+          "Click the <strong>⚙ gear icon</strong> in the bottom-left corner of Fabric",
+          "Click <strong>Deployment pipelines</strong> in the menu",
+          "Click on <strong>DigitalRealty-Pipeline</strong>",
+          "Point out the 3 stages: <strong>Development → Test → Production</strong>",
+          "Show each stage is linked to the correct workspace"
+        ],
+        notes: `<blockquote>"This is Fabric's built-in Deployment Pipeline. It lets us promote artifacts from Dev to Test to Production with one click. We'll use this for notebooks, pipelines, and other standard artifacts. For schema changes, we'll add an extra layer."</blockquote>`,
+        tips: ["If the audience asks 'why not just use this for everything?' — that's your cue to tease Part 4."]
+      },
+      {
+        id: "2.3", title: "Show the Azure DevOps Repo",
+        screen: "Azure DevOps",
+        actions: [
+          "Open a <strong>new browser tab</strong> → go to your Azure DevOps repo",
+          "Show the folder structure: <code>lakehouse-migrations/</code>, <code>pipelines/</code>, <code>scripts/</code>, <code>notebooks/</code>",
+          "Click into <code>lakehouse-migrations/migrations/</code> — show the SQL and Python files"
+        ],
+        notes: `<blockquote>"Here's our Azure DevOps repo. Notice the lakehouse-migrations folder — this is where we store our schema-as-code. Each version is a separate file — v001 for baseline, v002 for evolution."</blockquote>`,
+        tips: ["If you haven't pushed the repo yet, show the local folder structure on your machine instead."]
+      },
+      {
+        id: "2.4", title: "Show Git Integration in Dev Workspace",
+        screen: "Fabric Portal",
+        actions: [
+          "Switch back to <strong>Fabric portal</strong> → go to the <strong>DigitalRealty-Dev</strong> workspace",
+          "Click <strong>Workspace settings</strong> (gear icon, top-right)",
+          "Click <strong>Git integration</strong> in the left menu",
+          "Show the connection to Azure DevOps (repo, branch, root folder)"
+        ],
+        notes: `<blockquote>"The Dev workspace is connected to our Azure DevOps repo. When we make changes here — create a notebook, modify a pipeline — we can commit them to Git. And vice versa. This is the standard flow."</blockquote>`,
+        tips: ["If Git integration isn't connected yet, walk through the connection steps live — it's a great teaching moment."]
+      }
+    ]
+  },
+
+  // ─── PART 3: HAPPY PATH ───
+  {
+    part: 3, partTitle: "Live — Standard CI/CD Flow (Happy Path)", duration: "8 min",
+    goal: "Show that notebooks/pipelines flow perfectly through Git + Deployment Pipelines. This sets up the contrast for Part 4.",
+    steps: [
+      {
+        id: "3.1", title: "Create a Notebook in Dev",
+        screen: "Fabric Portal → Dev Workspace",
+        actions: [
+          "Go to <strong>DigitalRealty-Dev</strong> workspace",
+          "Click <strong>+ New item</strong> → select <strong>Notebook</strong>",
+          "Name it: <code>DataQualityChecks</code>",
+          "In the first cell, type:<br><pre># Data Quality Validation for Data Center Metrics\nprint(\"Running quality checks...\")</pre>",
+          "Press <strong>Ctrl+S</strong> to save"
+        ],
+        notes: `<blockquote>"I've created a simple notebook in Dev. This represents any standard Fabric artifact — a data pipeline, a report, a semantic model. Let's commit this to Git and deploy it."</blockquote>`,
+        tips: ["Keep the notebook simple — the point isn't the code, it's the flow."]
+      },
+      {
+        id: "3.2", title: "Commit to Git",
+        screen: "Fabric Portal → Dev Workspace",
+        actions: [
+          "Look at the top toolbar — click <strong>Source control</strong> (or find the notification banner)",
+          "You'll see the notebook listed as a pending change",
+          "Type commit message: <code>Add DataQualityChecks notebook</code>",
+          "Click <strong>Commit</strong>"
+        ],
+        notes: `<blockquote>"The notebook is now version-controlled in Git. Any team member can see the history, review changes, and roll back if needed."</blockquote>`,
+        tips: ["If Source control button isn't visible, Git integration may not be connected. That's OK — explain the concept."]
+      },
+      {
+        id: "3.3", title: "Deploy via Deployment Pipeline",
+        screen: "Fabric Portal → Deployment Pipelines",
+        actions: [
+          "Navigate to <strong>Deployment Pipelines</strong> → click <strong>DigitalRealty-Pipeline</strong>",
+          "You'll see the Dev stage shows the notebook",
+          "Click <strong>Deploy</strong> button between Development → Test",
+          "Wait for completion (~10–30 seconds)",
+          "Click on the Test stage → show the notebook now exists in UAT",
+          "Click <strong>Deploy</strong> between Test → Production",
+          "Show the notebook is now in all 3 environments"
+        ],
+        notes: `<blockquote>"One click, and the notebook is in UAT. Another click, and it's in Prod. Notebooks, pipelines, reports — they all flow through this standard Git + Deployment Pipeline workflow perfectly. But now let me show you what happens with Lakehouse tables..."</blockquote>`,
+        tips: ["Pause dramatically after 'But now...' — this is the cliffhanger.", "This sets up the problem reveal in Part 4."]
+      }
+    ]
+  },
+
+  // ─── PART 4: THE GAP ───
+  {
+    part: 4, partTitle: "Live — The Lakehouse Schema Gap", duration: "8 min",
+    goal: "Dramatically demonstrate that Lakehouse table changes do NOT propagate through Git or Deployment Pipelines. This is the 'aha' moment.",
+    steps: [
+      {
+        id: "4.1", title: "Create a Table in Dev Lakehouse",
+        screen: "Fabric Portal → Dev Lakehouse → SQL Endpoint",
+        actions: [
+          "Go to <strong>DigitalRealty-Dev</strong> workspace → click <strong>DataCenterLakehouse</strong>",
+          "In the top-right dropdown, switch from <strong>Lakehouse</strong> to <strong>SQL analytics endpoint</strong>",
+          "You're now in the SQL query editor — paste and run this SQL:",
+          "<pre>CREATE TABLE data_centers (\n    dc_id           STRING,\n    dc_name         STRING,\n    region          STRING,\n    city            STRING,\n    total_capacity_kw DOUBLE\n);</pre>",
+          "Click the <strong>▶ Run</strong> button",
+          "In the left panel (Explorer), confirm the new table appears",
+          "<strong>⏸ PAUSE</strong> — let the audience see the table is there"
+        ],
+        notes: `<blockquote>"I just created a table directly in the Dev Lakehouse — exactly the way your users do it today, through the SQL endpoint. You can see it right here in the explorer panel. Now let's check what Git knows about this..."</blockquote>`,
+        tips: ["Make sure the audience can see the table in the left panel.", "This is the setup for the 'gotcha' moment."]
+      },
+      {
+        id: "4.2", title: "Check Git — No Schema Changes!",
+        screen: "Fabric Portal → Dev Workspace",
+        actions: [
+          "Navigate back to the <strong>DigitalRealty-Dev</strong> workspace view",
+          "Click <strong>Source control</strong> in the top toolbar",
+          "Show the audience: <strong>No pending changes related to the table!</strong>",
+          "If there are any changes, click into them — show it's just container metadata, NOT the table DDL"
+        ],
+        notes: `<blockquote>"See that? I created a table, but Git doesn't know about it. The Lakehouse container metadata might have a small change, but the actual table definition — the CREATE TABLE statement, the columns, the data types — none of that is captured. This is the gap."</blockquote>`,
+        tips: ["Point at the screen. Say 'See? Nothing.' The emptiness IS the message.", "Let the silence do the work."]
+      },
+      {
+        id: "4.3", title: "Deploy to UAT — Table is MISSING!",
+        screen: "Fabric Portal → Deployment Pipeline",
+        actions: [
+          "Navigate to <strong>Deployment Pipelines</strong> → <strong>DigitalRealty-Pipeline</strong>",
+          "Click <strong>Deploy</strong> from Development → Test",
+          "Wait for completion",
+          "Go to <strong>DigitalRealty-UAT</strong> workspace → open <strong>DataCenterLakehouse</strong>",
+          "Switch to <strong>SQL analytics endpoint</strong>",
+          "Show the Explorer panel — <strong>the data_centers table is NOT here!</strong>"
+        ],
+        notes: `<blockquote>"We deployed to UAT, but the table didn't come along. The Lakehouse container was deployed — but it's empty. No tables. This is the exact problem you described in your email. You make schema changes in Dev, but UAT and Prod don't get them. Now let me show you the solution."</blockquote>`,
+        tips: ["Reference their original email here — 'This is the exact problem you described.'", "Strong transition: 'Now let me show you the solution.'"]
+      },
+      {
+        id: "4.4", title: "Clean Up for Solution Demo",
+        screen: "Fabric Portal → Dev Lakehouse",
+        actions: [
+          "Go back to <strong>Dev Lakehouse → SQL analytics endpoint</strong>",
+          "Run: <code>DROP TABLE IF EXISTS data_centers;</code>",
+          "This resets Dev for the schema-as-code demo"
+        ],
+        notes: `<blockquote>"Let me clean up so we start fresh for the solution. In real life, you wouldn't drop tables — but for the demo, I want you to see the tables being created through the schema-as-code approach."</blockquote>`,
+        tips: ["Be quick here — this is a mechanical step, not a teaching moment."]
+      }
+    ]
+  },
+
+  // ─── PART 5: SCHEMA-AS-CODE ───
+  {
+    part: 5, partTitle: "Live — Schema-as-Code Solution", duration: "18 min",
+    goal: "Show the complete solution: versioned migration scripts, migration runner notebook, and CI/CD pipeline that propagates schemas across environments.",
+    steps: [
+      {
+        id: "5.1", title: "Show Migration Scripts in Git",
+        screen: "Azure DevOps / GitHub",
+        actions: [
+          "Switch to your <strong>Azure DevOps</strong> (or GitHub) browser tab",
+          "Navigate to <code>lakehouse-migrations/migrations/</code>",
+          "Click <strong>v001_baseline_tables.sql</strong> — walk through the CREATE TABLE statements",
+          "Point out: <code>IF NOT EXISTS</code> for idempotency",
+          "Point out: all 3 tables — data_centers, power_consumption, cooling_metrics",
+          "Click <strong>v002_capacity_and_sustainability.sql</strong> — show the evolution",
+          "Point out: new tables (capacity_utilization, sla_incidents)",
+          "Point out: <code>ALTER TABLE</code> to add columns to existing table"
+        ],
+        notes: `<blockquote>"Instead of creating tables through the UI, we write SQL scripts and store them in Git. Each version is a numbered file. v001 is our baseline — it creates the foundational tables. v002 adds new tables and columns for sustainability tracking.<br><br>
+          The key insight: these scripts ARE the schema. Git IS the version control. Code review IS the governance."</blockquote>`,
+        tips: ["Slowly scroll through the SQL — let them read it.", "Mention IF NOT EXISTS — it's important for re-runnability."]
+      },
+      {
+        id: "5.2", title: "Show PySpark Alternatives",
+        screen: "Azure DevOps / GitHub",
+        actions: [
+          "Click <strong>v001_baseline_tables.py</strong> — show the PySpark version",
+          "Click <strong>v002_capacity_and_sustainability.py</strong> — show the PySpark version"
+        ],
+        notes: `<blockquote>"We also have PySpark versions of every migration. SQL is simpler for straightforward DDL — CREATE TABLE, ALTER TABLE. PySpark gives you more power when you need complex transformations, data seeding, or conditional logic."</blockquote>`,
+        tips: ["Don't spend too long here — 1 minute max. The SQL version is the star."]
+      },
+      {
+        id: "5.3", title: "Show the Migration Runner Notebook",
+        screen: "Azure DevOps / GitHub",
+        actions: [
+          "Navigate to <code>lakehouse-migrations/migration_runner.py</code>",
+          "Walk through the key sections:",
+          "→ <strong>Parameters:</strong> target_environment (Dev/UAT/Prod), migration_type (sql/pyspark)",
+          "→ <strong>Step 1:</strong> Reads available migration files",
+          "→ <strong>Step 2:</strong> Checks which migrations already ran (via _migration_history Delta table)",
+          "→ <strong>Step 3:</strong> Runs ONLY the new migrations",
+          "→ <strong>Step 4:</strong> Records each success in the history table"
+        ],
+        notes: `<blockquote>"This notebook is the engine. It's parameterized — you tell it which environment to target and whether to use SQL or PySpark. It's idempotent — you can run it 10 times and it won't break anything. It only applies new migrations that haven't been applied yet."</blockquote>`,
+        tips: ["Use the word 'idempotent' — enterprise teams love it.", "Say 'you can run it 10 times safely' — that's what they need to hear."]
+      },
+      {
+        id: "5.4", title: "Run Migrations in Dev",
+        screen: "Fabric Portal → Dev Workspace",
+        actions: [
+          "Switch to <strong>Fabric portal</strong> → <strong>DigitalRealty-Dev</strong> workspace",
+          "Open the <strong>migration_runner</strong> notebook (upload it if not already present)",
+          "Set the parameters: <code>target_environment = Dev</code>, <code>migration_type = sql</code>",
+          "Click <strong>Run all</strong> (▶▶ button)",
+          "Watch the cells execute — they'll print messages like:",
+          "<pre>Applying migration: v001_baseline_tables.sql\n✅ Created table: data_centers\n✅ Created table: power_consumption\n✅ Created table: cooling_metrics\nApplying migration: v002_capacity_and_sustainability.sql\n✅ Created table: capacity_utilization\n✅ Created table: sla_incidents\n✅ Altered table: power_consumption (added columns)\nMigration complete. 2 migrations applied.</pre>"
+        ],
+        notes: `<blockquote>"Watch the output — it's applying v001 first (3 tables), then v002 (2 new tables + column changes). Everything is logged. If I run it again, it would say 'No new migrations to apply.'"</blockquote>`,
+        tips: ["If the notebook isn't uploaded yet, that's OK — describe what would happen and show the code.", "If it runs live, let the audience watch the output stream in — it's satisfying."]
+      },
+      {
+        id: "5.5", title: "Verify Tables in Dev Lakehouse",
+        screen: "Fabric Portal → Dev Lakehouse",
+        actions: [
+          "Go to <strong>DataCenterLakehouse</strong> → switch to <strong>SQL analytics endpoint</strong>",
+          "Click <strong>Refresh</strong> on the Tables panel (left side)",
+          "Show ALL 5 tables: data_centers, power_consumption, cooling_metrics, capacity_utilization, sla_incidents",
+          "<strong>⏸ PAUSE</strong> — let them see the result"
+        ],
+        notes: `<blockquote>"All 5 tables are now in Dev, created from our version-controlled scripts. Every table, every column, every data type — all traceable back to a specific commit in Git. Now let's get these to UAT and Prod automatically."</blockquote>`,
+        tips: ["This is a victory moment. Smile.", "Say 'traceable back to Git' — that's what enterprise teams care about."]
+      },
+      {
+        id: "5.6", title: "Show the CI/CD Pipeline",
+        screen: "Azure DevOps",
+        actions: [
+          "Switch to <strong>Azure DevOps</strong> → go to <strong>Pipelines</strong>",
+          "Click on the <strong>fabric-schema-migration</strong> pipeline",
+          "Click <strong>Edit</strong> to show the YAML definition",
+          "Walk through: <strong>Trigger</strong> (watches lakehouse-migrations/ folder)",
+          "Walk through: <strong>Stage 1 — UAT</strong> (authenticates → calls REST API → runs notebook)",
+          "Walk through: <strong>Stage 2 — Prod</strong> (same + manual approval gate)",
+          "Click back → show the pipeline run history"
+        ],
+        notes: `<blockquote>"This Azure DevOps pipeline watches for changes in our migration folder. When someone pushes a new migration script, it automatically:<br>
+          1. Runs the migrations in UAT<br>
+          2. Waits for manual approval<br>
+          3. Runs them in Prod<br>
+          The approval gate ensures no one deploys to production without sign-off."</blockquote>`,
+        tips: ["Mention the approval gate — governance is a big deal for enterprise customers."]
+      },
+      {
+        id: "5.7", title: "Show GitHub Actions Variant",
+        screen: "GitHub",
+        actions: [
+          "Switch to <strong>GitHub</strong> → navigate to <code>.github/workflows/deploy-schema.yml</code>",
+          "Show the same pattern: trigger → UAT → approval → Prod",
+          "Go to <strong>Actions</strong> tab to show workflow runs (if available)"
+        ],
+        notes: `<blockquote>"Here's the same thing in GitHub Actions. Same concept, different platform. Use whichever your team prefers — or both. The migration scripts and runner notebook are the same regardless of CI/CD platform."</blockquote>`,
+        tips: ["Keep this brief — 2 minutes max. The point is platform flexibility."]
+      }
+    ]
+  },
+
+  // ─── PART 6: REST APIs ───
+  {
+    part: 6, partTitle: "Live — REST API Deep Dive", duration: "8 min",
+    goal: "Show the Fabric REST APIs that power the automation. This proves it's not magic — it's programmable.",
+    steps: [
+      {
+        id: "6.1", title: "Show the API Helper Script",
+        screen: "Azure DevOps / GitHub or Local Editor",
+        actions: [
+          "Open <code>scripts/fabric_api_helper.py</code> in the repo",
+          "Walk through the key methods:",
+          "→ <strong>Authentication:</strong> Get OAuth token using Service Principal",
+          "→ <strong>list_workspaces()</strong> — Lists all workspaces",
+          "→ <strong>list_items()</strong> — Lists items in a workspace",
+          "→ <strong>trigger_notebook()</strong> — Triggers a notebook run via Job Scheduler API",
+          "→ <strong>deploy_pipeline()</strong> — Triggers Deployment Pipeline via API"
+        ],
+        notes: `<blockquote>"These helper functions wrap the Fabric REST APIs. They handle authentication, error handling, and polling. This is what the CI/CD pipeline uses under the hood."</blockquote>`,
+        tips: []
+      },
+      {
+        id: "6.2", title: "Run Live API Calls",
+        screen: "Fabric Portal → Notebook / Terminal",
+        actions: [
+          "Open a notebook in the Dev workspace (or use a terminal)",
+          "Run <strong>Cell 1 — Authenticate</strong>:",
+          "<pre>import requests\ntoken = mssparkutils.credentials.getToken(\"https://api.fabric.microsoft.com\")\nheaders = {\"Authorization\": f\"Bearer {token}\"}</pre>",
+          "Run <strong>Cell 2 — List Workspaces</strong>:",
+          "<pre>r = requests.get(\"https://api.fabric.microsoft.com/v1/workspaces\", headers=headers)\nfor ws in r.json()[\"value\"]:\n    print(f\"  {ws['displayName']} ({ws['id']})\")</pre>",
+          "Run <strong>Cell 3 — List Items in UAT</strong>:",
+          "<pre>r = requests.get(f\"https://api.fabric.microsoft.com/v1/workspaces/{UAT_WS_ID}/items\", headers=headers)\nfor item in r.json()[\"value\"]:\n    print(f\"  {item['type']}: {item['displayName']}\")</pre>"
+        ],
+        notes: `<blockquote>"Everything we showed through the UI and pipelines — it's all available via REST APIs. List workspaces, list items, trigger notebooks, deploy pipelines, commit to Git — all programmable. This is how you build enterprise-grade automation."</blockquote>`,
+        tips: ["If live API calls aren't set up, show the code and explain.", "Never show tokens or secrets on screen!"]
+      },
+      {
+        id: "6.3", title: "Show Key API Documentation",
+        screen: "Microsoft Docs",
+        actions: [
+          "Open <strong>https://learn.microsoft.com/en-us/rest/api/fabric/</strong> — show the API reference",
+          "Open <strong>https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-automation</strong> — Git automation docs",
+          "Open <strong>https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/pipeline-automation-fabric</strong> — Deployment Pipeline automation"
+        ],
+        notes: `<blockquote>"These are the three key documentation pages. The Fabric REST API reference covers everything. The Git automation page shows how to programmatically commit and sync. The Deployment Pipeline page shows how to trigger promotions via API. Bookmark these."</blockquote>`,
+        tips: ["Share these links with the audience after the demo."]
+      }
+    ]
+  },
+
+  // ─── WRAP-UP ───
+  {
+    part: 7, partTitle: "Wrap-Up & Q&A", duration: "5 min",
+    goal: "Summarize the key takeaways. Open the floor for questions. Leave them confident in the approach.",
+    steps: [
+      {
+        id: "7.1", title: "Summary Slide",
+        screen: "PowerPoint",
+        actions: [
+          "Switch back to <strong>PowerPoint</strong> → go to <strong>Slide 5</strong> (Solution Architecture)",
+          "Or just summarize verbally with the Fabric portal still visible"
+        ],
+        notes: `<blockquote>"Let me summarize what we've shown today:<br><br>
+          1. <strong>Standard artifacts</strong> (notebooks, pipelines, reports) → Git + Deployment Pipelines work perfectly.<br>
+          2. <strong>Lakehouse schemas</strong> → Not tracked by Git today. This is a known gap.<br>
+          3. <strong>Schema-as-Code</strong> → Versioned migration scripts, run by a migration notebook, triggered by CI/CD.<br>
+          4. <strong>Both Azure DevOps and GitHub</strong> work for this.<br>
+          5. <strong>Fabric REST APIs</strong> power all the automation.<br><br>
+          One more important note: <strong>Fabric Warehouse</strong> DOES support object-level Git integration. If you need deep schema versioning natively, consider using Warehouse for structured tables and Lakehouse for unstructured/semi-structured data."</blockquote>`,
+        tips: ["The Warehouse mention is a strong closing point — it shows you know the full platform.", "End on a positive: 'The gap has a solution, and we just showed it working.'"]
+      },
+      {
+        id: "7.2", title: "Q&A",
+        screen: "Any — be ready to switch",
+        actions: [
+          "Say: <strong>\"Happy to go deeper on governance, APIs, or the migration runner.\"</strong>",
+          "Keep Fabric portal, Azure DevOps, GitHub, and docs tabs ready",
+          "Share the repo link and documentation links with the audience"
+        ],
+        notes: `<blockquote>"Questions? I'm happy to dive deeper into any aspect — the migration approach, the CI/CD pipeline setup, the REST APIs, or how this fits into your existing workflows."</blockquote>
+          <br><strong>Common questions to prepare for:</strong><br>
+          • "What about rollbacks?" → Migration scripts can include DOWN migrations; version the rollback too.<br>
+          • "What if someone creates tables via UI?" → The migration runner is the source of truth; UI changes should be captured as new migration scripts.<br>
+          • "Can we use Warehouse instead?" → Yes! Warehouse has full Git integration for schemas. Consider it for structured data.<br>
+          • "How do we handle data along with schema?" → Seed scripts can be part of migrations; or use separate data pipelines.<br>
+          • "What about permissions/RBAC?" → Service Principal needs Contributor on each workspace.`,
+        tips: ["Don't end early — Q&A is where trust is built.", "If no questions, ask them: 'What's your current pain point?'"]
+      }
+    ]
+  }
+];
+
+const allSteps = [];
+DEMO.forEach(part => part.steps.forEach(step => allSteps.push({ ...step, part: part.part, partTitle: part.partTitle })));
+const totalSteps = allSteps.length;
+const stepIndexMap = Object.fromEntries(allSteps.map((step, idx) => [step.id, idx]));
+
+let notesVisible = true;
+let qasVisible = true;
+let timerRunning = false;
+let timerSeconds = 0;
+let timerInterval = null;
+let currentStepIdx = 0;
+let completedSteps = new Set();
+let checkedActions = {};
+let partQaOpen = Object.fromEntries(DEMO.map(part => [part.part, false]));
+let selectedKnowledgeId = KNOWLEDGE_BASE[0]?.id || null;
+
+function safeSaveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      notesVisible,
+      qasVisible,
+      timerSeconds,
+      currentStepIdx,
+      completedSteps: Array.from(completedSteps),
+      checkedActions,
+      partQaOpen,
+      selectedKnowledgeId
+    }));
+  } catch (err) {
+    console.warn('State save skipped', err);
+  }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const state = JSON.parse(raw);
+    notesVisible = state.notesVisible ?? true;
+    qasVisible = state.qasVisible ?? true;
+    timerSeconds = Number.isFinite(state.timerSeconds) ? state.timerSeconds : 0;
+    currentStepIdx = Math.max(0, Math.min(totalSteps - 1, state.currentStepIdx ?? 0));
+    completedSteps = new Set(Array.isArray(state.completedSteps) ? state.completedSteps : []);
+    checkedActions = state.checkedActions && typeof state.checkedActions === 'object' ? state.checkedActions : {};
+    partQaOpen = { ...partQaOpen, ...(state.partQaOpen || {}) };
+    selectedKnowledgeId = state.selectedKnowledgeId || selectedKnowledgeId;
+  } catch (err) {
+    console.warn('State load skipped', err);
+  }
+}
+
+function render() {
+  renderSidebar();
+  renderMain();
+  renderKnowledgeBase();
+  updateTimerDisplay();
+  updateProgress();
+  updateToggleButtons();
+  safeSaveState();
+}
+
+function renderSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const qaCount = Object.values(QA_BY_PART).reduce((sum, items) => sum + items.length, 0);
+  let html = `
+    <div class="sidebar-summary">
+      <h1>Live Demo Runbook</h1>
+      <p>Every step, speaker note, concept refresher, and tough customer question in one place.</p>
+      <div class="summary-grid">
+        <div class="summary-card"><span class="label">Progress</span><strong id="progressLabel">${completedSteps.size}/${totalSteps} steps</strong></div>
+        <div class="summary-card"><span class="label">Hard Q&amp;A</span><strong>${qaCount} answers</strong></div>
+        <div class="summary-card"><span class="label">Knowledge Base</span><strong>${KNOWLEDGE_BASE.length} concepts</strong></div>
+        <div class="summary-card"><span class="label">Timer Goal</span><strong>60 minutes</strong></div>
+      </div>
+    </div>
+    <h3>Knowledge Base</h3>
+  `;
+
+  KNOWLEDGE_BASE.forEach(item => {
+    html += `<button class="linklike kb-link" onclick="openKnowledgeBase('${item.id}')">${item.title}</button>`;
+  });
+
+  DEMO.forEach(part => {
+    html += `<h3>Part ${part.part}: ${part.partTitle}</h3>`;
+    part.steps.forEach(step => {
+      const idx = stepIndexMap[step.id];
+      const active = idx === currentStepIdx ? 'active' : '';
+      const done = completedSteps.has(step.id) ? '<span class="check">✓</span>' : '';
+      html += `<a href="#step-${step.id}" class="${active}" onclick="goToStep(${idx}); return false;"><span class="num">${step.id}</span><span>${step.title}</span>${done}</a>`;
+    });
+    html += `<a href="#part-qa-${part.part}" class="meta-link qa-link" onclick="goToPartQA(${part.part}); return false;">Tough Questions</a>`;
+  });
+
+  sidebar.innerHTML = html;
+}
+
+function renderMain() {
+  const main = document.getElementById('main');
+  let html = `
+    <div class="links-bar">
+      <a href="https://app.fabric.microsoft.com" target="_blank" rel="noreferrer">🌐 Fabric Portal</a>
+      <a href="https://learn.microsoft.com/en-us/rest/api/fabric/" target="_blank" rel="noreferrer">📘 Fabric REST API</a>
+      <a href="https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-automation" target="_blank" rel="noreferrer">📘 Git Automation</a>
+      <a href="https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/pipeline-automation-fabric" target="_blank" rel="noreferrer">📘 Pipeline API</a>
+    </div>
+  `;
+
+  DEMO.forEach(part => {
+    const questions = QA_BY_PART[part.part] || [];
+    html += `
+      <section class="part-header" id="part-${part.part}">
+        <div class="part-num">Part ${part.part} of ${DEMO.length}</div>
+        <h2>${part.partTitle}</h2>
+        <div class="part-meta">
+          <span class="pill">⏱ ${part.duration}</span>
+          <span class="pill">🧭 ${part.steps.length} steps</span>
+          <span class="pill">❓ ${questions.length} tough questions</span>
+        </div>
+        <div class="goal">🎯 ${part.goal}</div>
+      </section>
+    `;
+
+    part.steps.forEach(step => {
+      const idx = stepIndexMap[step.id];
+      const isCurrent = idx === currentStepIdx;
+      const isDone = completedSteps.has(step.id);
+      const stepClass = isCurrent ? 'current' : (isDone ? 'done' : '');
+      const bodyClass = (isCurrent || isDone) ? '' : 'collapsed';
+      const statusIcon = isDone ? '✅' : (isCurrent ? '👉' : '○');
+      html += `
+        <article class="step ${stepClass}" id="step-${step.id}">
+          <div class="step-head" onclick="goToStep(${idx})">
+            <div class="step-num">${step.id}</div>
+            <div class="step-title-block">
+              <div class="step-title">${step.title}</div>
+              <div class="step-subtitle">Part ${part.part} · ${part.partTitle}</div>
+            </div>
+            <div class="step-screen">${step.screen}</div>
+            <div class="step-status">${statusIcon}</div>
+          </div>
+          <div class="step-body ${bodyClass}">
+      `;
+
+      step.actions.forEach((action, actionIdx) => {
+        const checked = checkedActions[`${step.id}:${actionIdx}`] ? 'checked' : '';
+        html += `
+          <div class="action">
+            <div class="action-check ${checked}" onclick="toggleAction(event, '${step.id}', ${actionIdx})"></div>
+            <div class="action-do">${action}</div>
+          </div>
+        `;
+      });
+
+      if (step.tips && step.tips.length) {
+        step.tips.forEach(tip => {
+          html += `<div class="tip">${tip}</div>`;
+        });
+      }
+
+      if (step.notes) {
+        html += `
+          <div class="notes ${notesVisible ? '' : 'hidden'}">
+            <div class="notes-label">🎤 What to say</div>
+            ${step.notes}
+          </div>
+        `;
+      }
+
+      html += `</div></article>`;
+    });
+
+    html += renderQaSection(part, questions);
+  });
+
+  main.innerHTML = html;
+}
+
+function renderQaSection(part, questions) {
+  const expanded = !!partQaOpen[part.part];
+  const sectionClass = qasVisible ? 'qa-section' : 'qa-section hidden';
+  return `
+    <section class="${sectionClass}" id="part-qa-${part.part}">
+      <button class="qa-toggle" onclick="togglePartQa(${part.part})">
+        <div class="qa-toggle-left">
+          <div>
+            <h3>❓ Tough Questions</h3>
+            <small>Hard objections and structured answers for ${part.partTitle}</small>
+          </div>
+          <span class="qa-count">${questions.length} ready answers</span>
+        </div>
+        <div class="qa-chevron">${expanded ? '▾' : '▸'}</div>
+      </button>
+      <div class="qa-panel ${expanded ? '' : 'collapsed'}">
+        ${questions.map(renderQaCard).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderQaCard(question) {
+  const badges = [];
+  if (question.demoHtml) badges.push('<span class="badge demo">Demo-worthy</span>');
+  if (question.followUpHtml) badges.push('<span class="badge followup">Follow-up ready</span>');
+  return `
+    <article class="qa-card">
+      <div class="qa-card-head">
+        <div>
+          <div class="qa-label">${question.id}</div>
+          <p class="qa-question">${question.question}</p>
+        </div>
+        <div class="qa-badges">${badges.join('')}</div>
+      </div>
+      <div class="qa-answer-grid">
+        <div class="qa-block">
+          <div class="qa-block-title">Structured answer</div>
+          ${question.answerHtml}
+        </div>
+        ${question.impactHtml ? `<div class="qa-block"><div class="qa-block-title">Impact / why it matters</div>${question.impactHtml}</div>` : ''}
+        ${question.followUpHtml ? `<div class="qa-block follow-up"><div class="qa-block-title">Follow-up</div>${question.followUpHtml}</div>` : ''}
+        ${question.demoHtml ? `<div class="qa-block demo"><div class="qa-block-title">Demo-worthy</div>${question.demoHtml}</div>` : ''}
+      </div>
+    </article>
+  `;
+}
+
+function renderKnowledgeBase() {
+  const nav = document.getElementById('knowledgeNav');
+  const content = document.getElementById('knowledgeContent');
+  const current = KNOWLEDGE_BASE.find(item => item.id === selectedKnowledgeId) || KNOWLEDGE_BASE[0];
+  if (!current) return;
+
+  nav.innerHTML = KNOWLEDGE_BASE.map((item, idx) => `
+    <button class="${item.id === current.id ? 'active' : ''}" onclick="switchKnowledge('${item.id}')">
+      <span class="kb-nav-title">${idx + 1}. ${item.title}</span>
+      <span class="kb-nav-summary">${item.summary}</span>
+    </button>
+  `).join('');
+
+  const currentIndex = KNOWLEDGE_BASE.findIndex(item => item.id === current.id) + 1;
+  content.innerHTML = `
+    <div class="knowledge-card">
+      <div class="knowledge-kicker">Concept ${currentIndex} of ${KNOWLEDGE_BASE.length}</div>
+      <h4>${current.title}</h4>
+      <p class="knowledge-summary">${current.summary}</p>
+      <div class="knowledge-body">${current.contentHtml}</div>
+    </div>
+  `;
+}
+
+function updateProgress() {
+  const percent = totalSteps ? (completedSteps.size / totalSteps) * 100 : 0;
+  document.getElementById('progressFill').style.width = percent + '%';
+  const progressLabel = document.getElementById('progressLabel');
+  if (progressLabel) progressLabel.textContent = `${completedSteps.size}/${totalSteps} steps`;
+}
+
+function updateToggleButtons() {
+  const notesBtn = document.getElementById('notesBtn');
+  const qaBtn = document.getElementById('qaBtn');
+  notesBtn.textContent = notesVisible ? '📝 Notes ON' : '📝 Notes OFF';
+  qaBtn.textContent = qasVisible ? '❓ Q&A ON' : '❓ Q&A OFF';
+  notesBtn.classList.toggle('active', notesVisible);
+  qaBtn.classList.toggle('active', qasVisible);
+}
+
+function updateTimerDisplay() {
+  const timer = document.getElementById('timer');
+  const minutes = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+  const seconds = (timerSeconds % 60).toString().padStart(2, '0');
+  timer.textContent = `${minutes}:${seconds}`;
+  if (timerSeconds > 3300) {
+    timer.style.color = '#f85149';
+  } else if (timerSeconds > 2700) {
+    timer.style.color = '#d29922';
+  } else {
+    timer.style.color = '#3fb950';
+  }
+  document.getElementById('timerBtn').textContent = timerRunning ? '⏸ Pause' : (timerSeconds > 0 ? '▶ Resume' : '▶ Start Timer');
+}
+
+function goToStep(idx) {
+  if (idx < 0 || idx >= totalSteps) return;
+  currentStepIdx = idx;
+  render();
+  const el = document.getElementById(`step-${allSteps[idx].id}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function nextStep() {
+  completedSteps.add(allSteps[currentStepIdx].id);
+  if (currentStepIdx < totalSteps - 1) {
+    goToStep(currentStepIdx + 1);
+  } else {
+    render();
+  }
+}
+
+function prevStep() {
+  if (currentStepIdx > 0) {
+    goToStep(currentStepIdx - 1);
+  }
+}
+
+function markDone() {
+  const step = allSteps[currentStepIdx];
+  if (completedSteps.has(step.id)) completedSteps.delete(step.id);
+  else completedSteps.add(step.id);
+  render();
+}
+
+function toggleAction(event, stepId, actionIdx) {
+  event.stopPropagation();
+  const key = `${stepId}:${actionIdx}`;
+  checkedActions[key] = !checkedActions[key];
+  event.currentTarget.classList.toggle('checked', checkedActions[key]);
+  safeSaveState();
+}
+
+function toggleNotes() {
+  notesVisible = !notesVisible;
+  document.querySelectorAll('.notes').forEach(note => note.classList.toggle('hidden', !notesVisible));
+  updateToggleButtons();
+  safeSaveState();
+}
+
+function toggleQA() {
+  qasVisible = !qasVisible;
+  document.querySelectorAll('.qa-section').forEach(section => section.classList.toggle('hidden', !qasVisible));
+  updateToggleButtons();
+  safeSaveState();
+}
+
+function togglePartQa(partNumber) {
+  partQaOpen[partNumber] = !partQaOpen[partNumber];
+  render();
+  document.getElementById(`part-qa-${partNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function goToPartQA(partNumber) {
+  qasVisible = true;
+  partQaOpen[partNumber] = true;
+  render();
+  document.getElementById(`part-qa-${partNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function toggleTimer() {
+  if (timerRunning) {
+    clearInterval(timerInterval);
+    timerRunning = false;
+    updateTimerDisplay();
+    safeSaveState();
+    return;
+  }
+
+  timerRunning = true;
+  updateTimerDisplay();
+  timerInterval = setInterval(() => {
+    timerSeconds += 1;
+    updateTimerDisplay();
+    safeSaveState();
+  }, 1000);
+}
+
+function openKnowledgeBase(id) {
+  if (id) selectedKnowledgeId = id;
+  document.getElementById('knowledgeModal').classList.add('show');
+  renderKnowledgeBase();
+  safeSaveState();
+}
+
+function switchKnowledge(id) {
+  selectedKnowledgeId = id;
+  renderKnowledgeBase();
+  safeSaveState();
+}
+
+function closeKnowledgeBase() {
+  document.getElementById('knowledgeModal').classList.remove('show');
+}
+
+function toggleShortcuts(forceOpen) {
+  const modal = document.getElementById('shortcutsModal');
+  if (typeof forceOpen === 'boolean') {
+    modal.classList.toggle('show', forceOpen);
+  } else {
+    modal.classList.toggle('show');
+  }
+}
+
+function closeModals() {
+  document.getElementById('knowledgeModal').classList.remove('show');
+  document.getElementById('shortcutsModal').classList.remove('show');
+}
+
+function resetAll() {
+  if (!confirm('Reset all progress, action checks, toggles, and timer?')) return;
+  completedSteps.clear();
+  checkedActions = {};
+  partQaOpen = Object.fromEntries(DEMO.map(part => [part.part, false]));
+  notesVisible = true;
+  qasVisible = true;
+  currentStepIdx = 0;
+  selectedKnowledgeId = KNOWLEDGE_BASE[0]?.id || selectedKnowledgeId;
+  timerSeconds = 0;
+  timerRunning = false;
+  clearInterval(timerInterval);
+  closeModals();
+  safeSaveState();
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.addEventListener('keydown', event => {
+  if (event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
+  switch (event.key) {
+    case 'ArrowRight':
+      event.preventDefault();
+      nextStep();
+      break;
+    case 'ArrowLeft':
+      event.preventDefault();
+      prevStep();
+      break;
+    case 'h':
+    case 'H':
+      event.preventDefault();
+      toggleNotes();
+      break;
+    case 'q':
+    case 'Q':
+      event.preventDefault();
+      toggleQA();
+      break;
+    case 't':
+    case 'T':
+      event.preventDefault();
+      toggleTimer();
+      break;
+    case 'd':
+    case 'D':
+      event.preventDefault();
+      markDone();
+      break;
+    case 'k':
+    case 'K':
+      event.preventDefault();
+      openKnowledgeBase();
+      break;
+    case 'Escape':
+      closeModals();
+      break;
+  }
+});
+
+loadState();
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "<string>", line 31, in <module>
+    print(t)
+    ~~~~~^^^
+
+================================================================================
+FILE: demo-presentation.html
+================================================================================
+Microsoft Fabric CI/CD ù Schema Evolution Solution
+Microsoft Fabric
+CI/CD & Schema Evolution
+Overview
+Platform
+Git Tracking
+The Gap
+Solution
+Pipeline
+Migration Scripts
+Runner
+CI/CD
+APIs
+Architecture
+Summary
+1 / 12
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2190' in position 0: character maps to <undefined>
