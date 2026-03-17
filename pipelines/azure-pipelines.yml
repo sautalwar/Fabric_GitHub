@@ -1,0 +1,635 @@
+# ==================================================================================================
+# Fabric CI/CD Demo - Azure DevOps pipeline
+#
+# This pipeline validates version-controlled Lakehouse migration scripts and deploys them to UAT and
+# Prod by invoking Microsoft Fabric notebook jobs through the Fabric REST API. Production deployment
+# is gated through the Azure DevOps 'Production' environment so manual approvals can be enforced.
+# ==================================================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - lakehouse-migrations/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: tenantId
+    value: '$(FABRIC_TENANT_ID)'        # Set in pipeline variables
+  - name: clientId
+    value: '$(FABRIC_CLIENT_ID)'        # Service Principal app ID
+  - name: clientSecret
+    value: '$(FABRIC_CLIENT_SECRET)'    # Service Principal secret - store as a secret pipeline variable
+  - name: uatWorkspaceId
+    value: '$(UAT_WORKSPACE_ID)'        # Fabric workspace GUID
+  - name: prodWorkspaceId
+    value: '$(PROD_WORKSPACE_ID)'       # Fabric workspace GUID
+  - name: migrationNotebookId
+    value: '$(MIGRATION_NOTEBOOK_ID)'   # migration_runner notebook item ID
+  - name: qualityNotebookId
+    value: '$(QUALITY_NOTEBOOK_ID)'     # data quality notebook item ID
+
+stages:
+  # -----------------------------------------------------------------------------------------------
+  # Stage 1 - Validate migration package
+  # -----------------------------------------------------------------------------------------------
+  - stage: Validate
+    displayName: 'Validate migrations'
+    jobs:
+      - job: ValidateMigrations
+        displayName: 'Validate migration scripts'
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            displayName: 'Checkout repository'
+
+          - bash: |
+              set -euo pipefail
+
+              previous_commit="$(git rev-parse HEAD~1 2>/dev/null || true)"
+              if [ -n "${previous_commit}" ]; then
+                changed_files="$(git diff --name-only "${previous_commit}" HEAD -- lakehouse-migrations | grep '^lakehouse-migrations/migrations/' || true)"
+              else
+                changed_files="$(git ls-files 'lakehouse-migrations/migrations/*' || true)"
+              fi
+
+              if [ -z "${changed_files}" ]; then
+                echo 'No new or changed migration files were detected in the latest commit.'
+                exit 0
+              fi
+
+              echo 'New or changed migration files:'
+              printf '%s\n' "${changed_files}" | sed '/^$/d' | sort
+            displayName: 'List new and changed migration files'
+
+          - bash: |
+              set -euo pipefail
+              shopt -s nullglob
+
+              sql_files=(lakehouse-migrations/migrations/*.sql)
+              if [ ${#sql_files[@]} -eq 0 ]; then
+                echo 'No SQL migration files found under lakehouse-migrations/migrations.'
+                exit 0
+              fi
+
+              failures=0
+              for file in "${sql_files[@]}"; do
+                echo "Linting ${file}"
+
+                if ! [[ "$(basename "${file}")" =~ ^v[0-9]{3}_[a-z0-9_]+\.sql$ ]]; then
+                  echo "##vso[task.logissue type=error]${file} does not follow the vNNN_description.sql naming convention."
+                  failures=1
+                fi
+
+                if ! grep -Eiq 'CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE' "${file}"; then
+                  echo "##vso[task.logissue type=error]${file} must contain CREATE TABLE or ALTER TABLE statements."
+                  failures=1
+                fi
+
+                if grep -Eiq 'DROP[[:space:]]+DATABASE|DROP[[:space:]]+SCHEMA' "${file}"; then
+                  echo "##vso[task.logissue type=error]${file} contains a forbidden DROP DATABASE or DROP SCHEMA statement."
+                  failures=1
+                fi
+              done
+
+              if [ "${failures}" -ne 0 ]; then
+                echo 'Migration validation failed.'
+                exit 1
+              fi
+
+              echo 'Migration validation passed.'
+            displayName: 'Validate SQL migration syntax'
+
+  # -----------------------------------------------------------------------------------------------
+  # Stage 2 - Deploy validated migrations to UAT
+  # -----------------------------------------------------------------------------------------------
+  - stage: DeployUAT
+    displayName: 'Deploy to UAT'
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: DeployLakehouseToUAT
+        displayName: 'Run UAT migration deployment'
+        steps:
+          - checkout: self
+            displayName: 'Checkout repository'
+
+          - bash: |
+              set -euo pipefail
+
+              response_file="$(mktemp)"
+              http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                -X POST "https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token" \
+                -H 'Content-Type: application/x-www-form-urlencoded' \
+                --data-urlencode "client_id=${CLIENT_ID}" \
+                --data-urlencode "client_secret=${CLIENT_SECRET}" \
+                --data-urlencode 'scope=https://api.fabric.microsoft.com/.default' \
+                --data-urlencode 'grant_type=client_credentials')"
+
+              if [ "${http_code}" -ne 200 ]; then
+                echo "##vso[task.logissue type=error]Token request failed with HTTP ${http_code}."
+                cat "${response_file}"
+                rm -f "${response_file}"
+                exit 1
+              fi
+
+              access_token="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('access_token',''))" "${response_file}")"
+              rm -f "${response_file}"
+
+              if [ -z "${access_token}" ]; then
+                echo '##vso[task.logissue type=error]Token response did not contain an access_token.'
+                exit 1
+              fi
+
+              echo "##vso[task.setvariable variable=fabricAccessToken;isSecret=true]${access_token}"
+            env:
+              TENANT_ID: $(tenantId)
+              CLIENT_ID: $(clientId)
+              CLIENT_SECRET: $(clientSecret)
+            displayName: 'Get Fabric access token'
+
+          - bash: |
+              set -euo pipefail
+
+              payload_file="$(mktemp)"
+              body_file="$(mktemp)"
+              headers_file="$(mktemp)"
+
+              cat > "${payload_file}" <<'JSON'
+              {
+                "executionData": {
+                  "parameters": {
+                    "target_environment": {
+                      "value": "UAT"
+                    },
+                    "migration_type": {
+                      "value": "sql"
+                    }
+                  }
+                }
+              }
+              JSON
+
+              http_code="$(curl -sS -D "${headers_file}" -o "${body_file}" -w '%{http_code}' \
+                -X POST "https://api.fabric.microsoft.com/v1/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
+                -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                -H 'Content-Type: application/json' \
+                --data @"${payload_file}")"
+
+              if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                echo "##vso[task.logissue type=error]Failed to trigger the UAT migration notebook. HTTP ${http_code}."
+                cat "${body_file}"
+                rm -f "${payload_file}" "${body_file}" "${headers_file}"
+                exit 1
+              fi
+
+              status_url="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {print substr($0, index($0,$2))}' "${headers_file}" | tr -d '\r' | tail -1)"
+              if [ -z "${status_url}" ]; then
+                status_url="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('statusUrl') or d.get('jobStatusUrl') or d.get('url') or '')" "${body_file}")"
+              fi
+              if [ -z "${status_url}" ]; then
+                job_id="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('id') or d.get('jobId') or d.get('instanceId') or '')" "${body_file}")"
+                if [ -n "${job_id}" ]; then
+                  status_url="https://api.fabric.microsoft.com/v1/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances/${job_id}"
+                fi
+              fi
+
+              rm -f "${payload_file}" "${body_file}" "${headers_file}"
+
+              if [ -z "${status_url}" ]; then
+                echo '##vso[task.logissue type=error]Unable to determine the UAT migration job status URL.'
+                exit 1
+              fi
+
+              echo "##vso[task.setvariable variable=uatMigrationStatusUrl]${status_url}"
+              echo 'Migration job status URL captured for polling.'
+            env:
+              FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+              WORKSPACE_ID: $(uatWorkspaceId)
+              NOTEBOOK_ID: $(migrationNotebookId)
+            displayName: 'Trigger UAT migration notebook'
+
+          - bash: |
+              set -euo pipefail
+
+              deadline=$((SECONDS + 600))
+              while [ ${SECONDS} -lt ${deadline} ]; do
+                response_file="$(mktemp)"
+                http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                  -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                  "${STATUS_URL}")"
+
+                if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                  echo "##vso[task.logissue type=error]Polling the UAT migration job failed with HTTP ${http_code}."
+                  cat "${response_file}"
+                  rm -f "${response_file}"
+                  exit 1
+                fi
+
+                status="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print((d.get('status') or d.get('state') or d.get('jobStatus') or '').strip())" "${response_file}")"
+                echo "UAT migration job status: ${status:-unknown}"
+                rm -f "${response_file}"
+
+                case "${status,,}" in
+                  completed|succeeded|success)
+                    echo 'UAT migration completed successfully.'
+                    exit 0
+                    ;;
+                  failed|error|cancelled|canceled)
+                    echo "##vso[task.logissue type=error]UAT migration notebook finished with status ${status}."
+                    exit 1
+                    ;;
+                esac
+
+                sleep 15
+              done
+
+              echo '##vso[task.logissue type=error]Timed out waiting for the UAT migration notebook after 10 minutes.'
+              exit 1
+            env:
+              FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+              STATUS_URL: $(uatMigrationStatusUrl)
+            displayName: 'Poll UAT migration job completion'
+
+          - bash: |
+              set -euo pipefail
+
+              trigger_job() {
+                local workspace_id="$1"
+                local notebook_id="$2"
+                local target_environment="$3"
+                local payload_file body_file headers_file http_code status_url job_id
+
+                payload_file="$(mktemp)"
+                body_file="$(mktemp)"
+                headers_file="$(mktemp)"
+
+                cat > "${payload_file}" <<JSON
+                {
+                  "executionData": {
+                    "parameters": {
+                      "target_environment": {
+                        "value": "${target_environment}"
+                      },
+                      "validation_type": {
+                        "value": "post_deployment"
+                      }
+                    }
+                  }
+                }
+                JSON
+
+                http_code="$(curl -sS -D "${headers_file}" -o "${body_file}" -w '%{http_code}' \
+                  -X POST "https://api.fabric.microsoft.com/v1/workspaces/${workspace_id}/items/${notebook_id}/jobs/instances?jobType=RunNotebook" \
+                  -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data @"${payload_file}")"
+
+                if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                  echo "##vso[task.logissue type=error]Failed to trigger the quality notebook. HTTP ${http_code}."
+                  cat "${body_file}"
+                  rm -f "${payload_file}" "${body_file}" "${headers_file}"
+                  exit 1
+                fi
+
+                status_url="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {print substr($0, index($0,$2))}' "${headers_file}" | tr -d '\r' | tail -1)"
+                if [ -z "${status_url}" ]; then
+                  status_url="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('statusUrl') or d.get('jobStatusUrl') or d.get('url') or '')" "${body_file}")"
+                fi
+                if [ -z "${status_url}" ]; then
+                  job_id="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('id') or d.get('jobId') or d.get('instanceId') or '')" "${body_file}")"
+                  if [ -n "${job_id}" ]; then
+                    status_url="https://api.fabric.microsoft.com/v1/workspaces/${workspace_id}/items/${notebook_id}/jobs/instances/${job_id}"
+                  fi
+                fi
+
+                rm -f "${payload_file}" "${body_file}" "${headers_file}"
+
+                if [ -z "${status_url}" ]; then
+                  echo '##vso[task.logissue type=error]Unable to determine the quality notebook job status URL.'
+                  exit 1
+                fi
+
+                echo "${status_url}"
+              }
+
+              poll_job() {
+                local status_url="$1"
+                local job_name="$2"
+                local deadline=$((SECONDS + 600))
+
+                while [ ${SECONDS} -lt ${deadline} ]; do
+                  local response_file http_code status
+                  response_file="$(mktemp)"
+                  http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                    -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                    "${status_url}")"
+
+                  if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                    echo "##vso[task.logissue type=error]Polling ${job_name} failed with HTTP ${http_code}."
+                    cat "${response_file}"
+                    rm -f "${response_file}"
+                    exit 1
+                  fi
+
+                  status="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print((d.get('status') or d.get('state') or d.get('jobStatus') or '').strip())" "${response_file}")"
+                  echo "${job_name} status: ${status:-unknown}"
+                  rm -f "${response_file}"
+
+                  case "${status,,}" in
+                    completed|succeeded|success)
+                      return 0
+                      ;;
+                    failed|error|cancelled|canceled)
+                      echo "##vso[task.logissue type=error]${job_name} finished with status ${status}."
+                      exit 1
+                      ;;
+                  esac
+
+                  sleep 15
+                done
+
+                echo "##vso[task.logissue type=error]Timed out waiting for ${job_name} after 10 minutes."
+                exit 1
+              }
+
+              quality_status_url="$(trigger_job "${WORKSPACE_ID}" "${QUALITY_NOTEBOOK_ID}" 'UAT')"
+              echo 'Quality notebook triggered successfully.'
+              poll_job "${quality_status_url}" 'UAT data quality validation'
+              echo 'UAT data quality validation completed successfully.'
+            env:
+              FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+              WORKSPACE_ID: $(uatWorkspaceId)
+              QUALITY_NOTEBOOK_ID: $(qualityNotebookId)
+            displayName: 'Run UAT data quality validation'
+
+  # -----------------------------------------------------------------------------------------------
+  # Stage 3 - Deploy validated migrations to Production after manual approval
+  # -----------------------------------------------------------------------------------------------
+  - stage: DeployProd
+    displayName: 'Deploy to Prod'
+    dependsOn: DeployUAT
+    condition: succeeded()
+    jobs:
+      - deployment: DeployLakehouseToProd
+        displayName: 'Run Prod migration deployment'
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  displayName: 'Checkout repository'
+
+                - bash: |
+                    set -euo pipefail
+
+                    response_file="$(mktemp)"
+                    http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                      -X POST "https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token" \
+                      -H 'Content-Type: application/x-www-form-urlencoded' \
+                      --data-urlencode "client_id=${CLIENT_ID}" \
+                      --data-urlencode "client_secret=${CLIENT_SECRET}" \
+                      --data-urlencode 'scope=https://api.fabric.microsoft.com/.default' \
+                      --data-urlencode 'grant_type=client_credentials')"
+
+                    if [ "${http_code}" -ne 200 ]; then
+                      echo "##vso[task.logissue type=error]Token request failed with HTTP ${http_code}."
+                      cat "${response_file}"
+                      rm -f "${response_file}"
+                      exit 1
+                    fi
+
+                    access_token="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('access_token',''))" "${response_file}")"
+                    rm -f "${response_file}"
+
+                    if [ -z "${access_token}" ]; then
+                      echo '##vso[task.logissue type=error]Token response did not contain an access_token.'
+                      exit 1
+                    fi
+
+                    echo "##vso[task.setvariable variable=fabricAccessToken;isSecret=true]${access_token}"
+                  env:
+                    TENANT_ID: $(tenantId)
+                    CLIENT_ID: $(clientId)
+                    CLIENT_SECRET: $(clientSecret)
+                  displayName: 'Get Fabric access token'
+
+                - bash: |
+                    set -euo pipefail
+
+                    payload_file="$(mktemp)"
+                    body_file="$(mktemp)"
+                    headers_file="$(mktemp)"
+
+                    cat > "${payload_file}" <<'JSON'
+                    {
+                      "executionData": {
+                        "parameters": {
+                          "target_environment": {
+                            "value": "Prod"
+                          },
+                          "migration_type": {
+                            "value": "sql"
+                          }
+                        }
+                      }
+                    }
+                    JSON
+
+                    http_code="$(curl -sS -D "${headers_file}" -o "${body_file}" -w '%{http_code}' \
+                      -X POST "https://api.fabric.microsoft.com/v1/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
+                      -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                      -H 'Content-Type: application/json' \
+                      --data @"${payload_file}")"
+
+                    if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                      echo "##vso[task.logissue type=error]Failed to trigger the Prod migration notebook. HTTP ${http_code}."
+                      cat "${body_file}"
+                      rm -f "${payload_file}" "${body_file}" "${headers_file}"
+                      exit 1
+                    fi
+
+                    status_url="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {print substr($0, index($0,$2))}' "${headers_file}" | tr -d '\r' | tail -1)"
+                    if [ -z "${status_url}" ]; then
+                      status_url="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('statusUrl') or d.get('jobStatusUrl') or d.get('url') or '')" "${body_file}")"
+                    fi
+                    if [ -z "${status_url}" ]; then
+                      job_id="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('id') or d.get('jobId') or d.get('instanceId') or '')" "${body_file}")"
+                      if [ -n "${job_id}" ]; then
+                        status_url="https://api.fabric.microsoft.com/v1/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances/${job_id}"
+                      fi
+                    fi
+
+                    rm -f "${payload_file}" "${body_file}" "${headers_file}"
+
+                    if [ -z "${status_url}" ]; then
+                      echo '##vso[task.logissue type=error]Unable to determine the Prod migration job status URL.'
+                      exit 1
+                    fi
+
+                    echo "##vso[task.setvariable variable=prodMigrationStatusUrl]${status_url}"
+                    echo 'Migration job status URL captured for polling.'
+                  env:
+                    FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+                    WORKSPACE_ID: $(prodWorkspaceId)
+                    NOTEBOOK_ID: $(migrationNotebookId)
+                  displayName: 'Trigger Prod migration notebook'
+
+                - bash: |
+                    set -euo pipefail
+
+                    deadline=$((SECONDS + 600))
+                    while [ ${SECONDS} -lt ${deadline} ]; do
+                      response_file="$(mktemp)"
+                      http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                        -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                        "${STATUS_URL}")"
+
+                      if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                        echo "##vso[task.logissue type=error]Polling the Prod migration job failed with HTTP ${http_code}."
+                        cat "${response_file}"
+                        rm -f "${response_file}"
+                        exit 1
+                      fi
+
+                      status="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print((d.get('status') or d.get('state') or d.get('jobStatus') or '').strip())" "${response_file}")"
+                      echo "Prod migration job status: ${status:-unknown}"
+                      rm -f "${response_file}"
+
+                      case "${status,,}" in
+                        completed|succeeded|success)
+                          echo 'Prod migration completed successfully.'
+                          exit 0
+                          ;;
+                        failed|error|cancelled|canceled)
+                          echo "##vso[task.logissue type=error]Prod migration notebook finished with status ${status}."
+                          exit 1
+                          ;;
+                      esac
+
+                      sleep 15
+                    done
+
+                    echo '##vso[task.logissue type=error]Timed out waiting for the Prod migration notebook after 10 minutes.'
+                    exit 1
+                  env:
+                    FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+                    STATUS_URL: $(prodMigrationStatusUrl)
+                  displayName: 'Poll Prod migration job completion'
+
+                - bash: |
+                    set -euo pipefail
+
+                    trigger_job() {
+                      local workspace_id="$1"
+                      local notebook_id="$2"
+                      local target_environment="$3"
+                      local payload_file body_file headers_file http_code status_url job_id
+
+                      payload_file="$(mktemp)"
+                      body_file="$(mktemp)"
+                      headers_file="$(mktemp)"
+
+                      cat > "${payload_file}" <<JSON
+                      {
+                        "executionData": {
+                          "parameters": {
+                            "target_environment": {
+                              "value": "${target_environment}"
+                            },
+                            "validation_type": {
+                              "value": "post_deployment"
+                            }
+                          }
+                        }
+                      }
+                      JSON
+
+                      http_code="$(curl -sS -D "${headers_file}" -o "${body_file}" -w '%{http_code}' \
+                        -X POST "https://api.fabric.microsoft.com/v1/workspaces/${workspace_id}/items/${notebook_id}/jobs/instances?jobType=RunNotebook" \
+                        -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                        -H 'Content-Type: application/json' \
+                        --data @"${payload_file}")"
+
+                      if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                        echo "##vso[task.logissue type=error]Failed to trigger the quality notebook. HTTP ${http_code}."
+                        cat "${body_file}"
+                        rm -f "${payload_file}" "${body_file}" "${headers_file}"
+                        exit 1
+                      fi
+
+                      status_url="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {print substr($0, index($0,$2))}' "${headers_file}" | tr -d '\r' | tail -1)"
+                      if [ -z "${status_url}" ]; then
+                        status_url="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('statusUrl') or d.get('jobStatusUrl') or d.get('url') or '')" "${body_file}")"
+                      fi
+                      if [ -z "${status_url}" ]; then
+                        job_id="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('id') or d.get('jobId') or d.get('instanceId') or '')" "${body_file}")"
+                        if [ -n "${job_id}" ]; then
+                          status_url="https://api.fabric.microsoft.com/v1/workspaces/${workspace_id}/items/${notebook_id}/jobs/instances/${job_id}"
+                        fi
+                      fi
+
+                      rm -f "${payload_file}" "${body_file}" "${headers_file}"
+
+                      if [ -z "${status_url}" ]; then
+                        echo '##vso[task.logissue type=error]Unable to determine the quality notebook job status URL.'
+                        exit 1
+                      fi
+
+                      echo "${status_url}"
+                    }
+
+                    poll_job() {
+                      local status_url="$1"
+                      local job_name="$2"
+                      local deadline=$((SECONDS + 600))
+
+                      while [ ${SECONDS} -lt ${deadline} ]; do
+                        local response_file http_code status
+                        response_file="$(mktemp)"
+                        http_code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+                          -H "Authorization: Bearer ${FABRIC_ACCESS_TOKEN}" \
+                          "${status_url}")"
+
+                        if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+                          echo "##vso[task.logissue type=error]Polling ${job_name} failed with HTTP ${http_code}."
+                          cat "${response_file}"
+                          rm -f "${response_file}"
+                          exit 1
+                        fi
+
+                        status="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print((d.get('status') or d.get('state') or d.get('jobStatus') or '').strip())" "${response_file}")"
+                        echo "${job_name} status: ${status:-unknown}"
+                        rm -f "${response_file}"
+
+                        case "${status,,}" in
+                          completed|succeeded|success)
+                            return 0
+                            ;;
+                          failed|error|cancelled|canceled)
+                            echo "##vso[task.logissue type=error]${job_name} finished with status ${status}."
+                            exit 1
+                            ;;
+                        esac
+
+                        sleep 15
+                      done
+
+                      echo "##vso[task.logissue type=error]Timed out waiting for ${job_name} after 10 minutes."
+                      exit 1
+                    }
+
+                    quality_status_url="$(trigger_job "${WORKSPACE_ID}" "${QUALITY_NOTEBOOK_ID}" 'Prod')"
+                    echo 'Quality notebook triggered successfully.'
+                    poll_job "${quality_status_url}" 'Prod data quality validation'
+                    echo 'Prod data quality validation completed successfully.'
+                  env:
+                    FABRIC_ACCESS_TOKEN: $(fabricAccessToken)
+                    WORKSPACE_ID: $(prodWorkspaceId)
+                    QUALITY_NOTEBOOK_ID: $(qualityNotebookId)
+                  displayName: 'Run Prod data quality validation'

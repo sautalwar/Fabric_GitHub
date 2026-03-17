@@ -1,0 +1,862 @@
+# This workflow promotes Lakehouse schema migrations through environments.
+#
+# Required repository secrets:
+#   - AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   - SQL_ENDPOINT_DEV, SQL_ENDPOINT_UAT, SQL_ENDPOINT_PROD
+#   - LAKEHOUSE_DATABASE
+#
+# Required repository variables:
+#   - WORKSPACE_ID_DEV, WORKSPACE_ID_UAT, WORKSPACE_ID_PROD
+#   - MIGRATION_NOTEBOOK_ID_UAT, MIGRATION_NOTEBOOK_ID_PROD
+#
+# Important note for new users:
+#   - Pull requests only run the validation job.
+#   - Manual runs can deploy to UAT or Prod.
+#   - A Prod promotion always goes through UAT first in this workflow.
+name: "🚀 Promote Schema — Dev → UAT → Prod"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Choose the highest environment to promote to. Prod runs UAT first."
+        required: true
+        type: choice
+        options:
+          - UAT
+          - Prod
+  pull_request:
+    paths:
+      - "lakehouse-migrations/migrations/**"
+
+env:
+  FABRIC_API_BASE: "https://api.fabric.microsoft.com/v1"
+  WORKSPACE_ID_DEV: ${{ vars.WORKSPACE_ID_DEV }}
+  WORKSPACE_ID_UAT: ${{ vars.WORKSPACE_ID_UAT }}
+  WORKSPACE_ID_PROD: ${{ vars.WORKSPACE_ID_PROD }}
+  SQL_ENDPOINT_DEV: ${{ secrets.SQL_ENDPOINT_DEV }}
+  SQL_ENDPOINT_UAT: ${{ secrets.SQL_ENDPOINT_UAT }}
+  SQL_ENDPOINT_PROD: ${{ secrets.SQL_ENDPOINT_PROD }}
+  LAKEHOUSE_DATABASE: ${{ secrets.LAKEHOUSE_DATABASE }}
+  MIGRATION_NOTEBOOK_ID_UAT: ${{ vars.MIGRATION_NOTEBOOK_ID_UAT }}
+  MIGRATION_NOTEBOOK_ID_PROD: ${{ vars.MIGRATION_NOTEBOOK_ID_PROD }}
+
+permissions:
+  contents: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: "✅ Validate migration package"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: "🧾 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "🧭 Resolve validation target"
+        id: resolve_target
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            target_environment="${{ inputs.target_environment }}"
+          else
+            # Pull requests only validate, so we default dry-run validation to UAT.
+            target_environment="UAT"
+          fi
+
+          case "${target_environment}" in
+            UAT)
+              workspace_id="${WORKSPACE_ID_UAT}"
+              notebook_id="${MIGRATION_NOTEBOOK_ID_UAT}"
+              sql_endpoint="${SQL_ENDPOINT_UAT}"
+              ;;
+            Prod)
+              workspace_id="${WORKSPACE_ID_PROD}"
+              notebook_id="${MIGRATION_NOTEBOOK_ID_PROD}"
+              sql_endpoint="${SQL_ENDPOINT_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported validation target '${target_environment}'."
+              exit 1
+              ;;
+          esac
+
+          for name in workspace_id notebook_id sql_endpoint; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required configuration '${name}' for target ${target_environment}."
+              exit 1
+            fi
+          done
+
+          {
+            echo "target_environment=${target_environment}"
+            echo "workspace_id=${workspace_id}"
+            echo "notebook_id=${notebook_id}"
+            echo "sql_endpoint=${sql_endpoint}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "📄 Identify migration files to validate"
+        id: changed_files
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}"
+            mapfile -t files < <(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- lakehouse-migrations/migrations)
+          else
+            mapfile -t files < <(git ls-files lakehouse-migrations/migrations)
+          fi
+
+          {
+            echo "files<<EOF"
+            printf '%s\n' "${files[@]}"
+            echo "EOF"
+            echo "file_count=${#files[@]}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No migration files were found in this change set."
+          else
+            printf ' - %s\n' "${files[@]}"
+          fi
+
+      - name: "🧪 Validate SQL and Python migration syntax"
+        run: |
+          set -euo pipefail
+
+          changed_files="${{ steps.changed_files.outputs.files }}"
+
+          if [[ -z "${changed_files}" ]]; then
+            echo "No migration files to validate."
+            exit 0
+          fi
+
+          while IFS= read -r file; do
+            [[ -z "${file}" ]] && continue
+
+            case "${file}" in
+              *.sql)
+                echo "Validating SQL migration: ${file}"
+                if ! grep -Eq ';[[:space:]]*$' "${file}"; then
+                  echo "::error file=${file}::SQL migration does not appear to end with a semicolon."
+                  exit 1
+                fi
+                if ! grep -Eiq 'CREATE|ALTER|INSERT|UPDATE|DELETE|MERGE|DROP|TRUNCATE' "${file}"; then
+                  echo "::error file=${file}::SQL migration does not contain a recognizable DDL or DML statement."
+                  exit 1
+                fi
+                ;;
+              *.py)
+                echo "Validating PySpark migration: ${file}"
+                python -m py_compile "${file}"
+                ;;
+              *)
+                echo "Skipping non-executable migration asset: ${file}"
+                ;;
+            esac
+          done <<< "${changed_files}"
+
+      - name: "🔐 Sign in to Azure with OIDC"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "🎟️ Acquire Fabric API token"
+        id: fabric_token
+        run: |
+          set -euo pipefail
+
+          access_token=$(az account get-access-token --resource "https://api.fabric.microsoft.com" --query accessToken -o tsv)
+          if [[ -z "${access_token}" ]]; then
+            echo "::error::Failed to acquire a Fabric API access token."
+            exit 1
+          fi
+
+          echo "::add-mask::${access_token}"
+          echo "access_token=${access_token}" >> "$GITHUB_OUTPUT"
+
+      - name: "🧪 Trigger migration runner dry-run notebook"
+        id: run_dry_run
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+          TARGET_ENVIRONMENT: ${{ steps.resolve_target.outputs.target_environment }}
+          WORKSPACE_ID: ${{ steps.resolve_target.outputs.workspace_id }}
+          NOTEBOOK_ID: ${{ steps.resolve_target.outputs.notebook_id }}
+        run: |
+          set -euo pipefail
+
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "target_environment": {
+                  "value": "${TARGET_ENVIRONMENT}",
+                  "type": "string"
+                },
+                "migration_type": {
+                  "value": "sql",
+                  "type": "string"
+                },
+                "migrations_path": {
+                  "value": "/lakehouse/default/Files/migrations",
+                  "type": "string"
+                },
+                "dry_run": {
+                  "value": true,
+                  "type": "bool"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                },
+                "git_ref": {
+                  "value": "${GITHUB_REF_NAME}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}")
+
+          if [[ "${http_code}" != "202" ]]; then
+            echo "::error::Failed to start the dry-run notebook (HTTP ${http_code})."
+            cat "${body_file}"
+            exit 1
+          fi
+
+          job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+          retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+
+          if [[ -z "${job_url}" ]]; then
+            echo "::error::Fabric API did not return a job location for the dry-run notebook."
+            exit 1
+          fi
+
+          echo "job_url=${job_url}" >> "$GITHUB_OUTPUT"
+          echo "poll_interval=${retry_after:-30}" >> "$GITHUB_OUTPUT"
+
+      - name: "⏳ Wait for dry-run notebook completion"
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+          JOB_URL: ${{ steps.run_dry_run.outputs.job_url }}
+          POLL_INTERVAL: ${{ steps.run_dry_run.outputs.poll_interval }}
+        run: |
+          set -euo pipefail
+
+          max_attempts=40
+          sleep_seconds="${POLL_INTERVAL:-30}"
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "${JOB_URL}")
+
+            if [[ "${http_code}" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling the dry-run notebook. Waiting ${retry_after}s before retrying."
+              sleep "${retry_after}"
+              continue
+            fi
+
+            if [[ "${http_code}" != "200" ]]; then
+              echo "::error::Unexpected response while polling the dry-run notebook (HTTP ${http_code})."
+              cat "${body_file}"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "${body_file}")
+            echo "Attempt ${attempt}/${max_attempts}: dry-run notebook status = ${job_status}"
+
+            case "${job_status}" in
+              Completed)
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::Dry-run notebook ended with status '${job_status}'."
+                cat "${body_file}"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "${sleep_seconds}"
+                ;;
+              *)
+                echo "::warning::Unexpected dry-run notebook status '${job_status}'. Continuing to poll."
+                sleep "${sleep_seconds}"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the dry-run notebook to complete."
+          exit 1
+
+      - name: "🧾 Post validation results"
+        if: always()
+        run: |
+          set -euo pipefail
+
+          {
+            echo "# Validation results"
+            echo
+            echo "- Event: `${{ github.event_name }}`"
+            echo "- Validation target: `${{ steps.resolve_target.outputs.target_environment }}`"
+            echo "- Migration files evaluated: `${{ steps.changed_files.outputs.file_count }}`"
+            echo "- Dry-run notebook: Completed successfully if this step was reached after a green validation job."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-uat:
+    name: "🚚 Deploy schema to UAT"
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && (inputs.target_environment == 'UAT' || inputs.target_environment == 'Prod')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: UAT
+
+    steps:
+      - name: "🧾 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "📦 Install deployment dependencies"
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          python -m pip install pyodbc azure-identity
+
+      - name: "✅ Validate required UAT configuration"
+        run: |
+          set -euo pipefail
+
+          required_vars=(WORKSPACE_ID_UAT MIGRATION_NOTEBOOK_ID_UAT SQL_ENDPOINT_UAT LAKEHOUSE_DATABASE)
+          for var_name in "${required_vars[@]}"; do
+            if [[ -z "${!var_name:-}" ]]; then
+              echo "::error::Required configuration '${var_name}' is missing for the UAT deployment."
+              exit 1
+            fi
+          done
+
+      - name: "🔐 Sign in to Azure with OIDC"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "🎟️ Acquire Fabric API token"
+        id: fabric_token
+        run: |
+          set -euo pipefail
+
+          access_token=$(az account get-access-token --resource "https://api.fabric.microsoft.com" --query accessToken -o tsv)
+          if [[ -z "${access_token}" ]]; then
+            echo "::error::Failed to acquire a Fabric API access token."
+            exit 1
+          fi
+
+          echo "::add-mask::${access_token}"
+          echo "access_token=${access_token}" >> "$GITHUB_OUTPUT"
+
+      - name: "🚀 Trigger migration runner notebook in UAT"
+        id: run_migrations
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "target_environment": {
+                  "value": "UAT",
+                  "type": "string"
+                },
+                "migration_type": {
+                  "value": "sql",
+                  "type": "string"
+                },
+                "migrations_path": {
+                  "value": "/lakehouse/default/Files/migrations",
+                  "type": "string"
+                },
+                "dry_run": {
+                  "value": false,
+                  "type": "bool"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                },
+                "git_ref": {
+                  "value": "${GITHUB_REF_NAME}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID_UAT}/items/${MIGRATION_NOTEBOOK_ID_UAT}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}")
+
+          if [[ "${http_code}" != "202" ]]; then
+            echo "::error::Failed to start the UAT migration notebook (HTTP ${http_code})."
+            cat "${body_file}"
+            exit 1
+          fi
+
+          job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+          retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+
+          if [[ -z "${job_url}" ]]; then
+            echo "::error::Fabric API did not return a job location for the UAT deployment notebook."
+            exit 1
+          fi
+
+          echo "job_url=${job_url}" >> "$GITHUB_OUTPUT"
+          echo "poll_interval=${retry_after:-30}" >> "$GITHUB_OUTPUT"
+
+      - name: "⏳ Wait for UAT migration completion"
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+          JOB_URL: ${{ steps.run_migrations.outputs.job_url }}
+          POLL_INTERVAL: ${{ steps.run_migrations.outputs.poll_interval }}
+        run: |
+          set -euo pipefail
+
+          max_attempts=40
+          sleep_seconds="${POLL_INTERVAL:-30}"
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "${JOB_URL}")
+
+            if [[ "${http_code}" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling the UAT deployment. Waiting ${retry_after}s before retrying."
+              sleep "${retry_after}"
+              continue
+            fi
+
+            if [[ "${http_code}" != "200" ]]; then
+              echo "::error::Unexpected response while polling the UAT deployment (HTTP ${http_code})."
+              cat "${body_file}"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "${body_file}")
+            echo "Attempt ${attempt}/${max_attempts}: UAT notebook status = ${job_status}"
+
+            case "${job_status}" in
+              Completed)
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::UAT deployment notebook ended with status '${job_status}'."
+                cat "${body_file}"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "${sleep_seconds}"
+                ;;
+              *)
+                echo "::warning::Unexpected UAT deployment status '${job_status}'. Continuing to poll."
+                sleep "${sleep_seconds}"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the UAT deployment to complete."
+          exit 1
+
+      - name: "📸 Refresh the UAT schema export"
+        run: |
+          set -euo pipefail
+
+          python scripts/schema_extractor.py \
+            --endpoint "${SQL_ENDPOINT_UAT}" \
+            --database "${LAKEHOUSE_DATABASE}" \
+            --output-dir "schema-export/UAT" \
+            --auth-method azure-cli \
+            --log-level INFO
+
+      - name: "📝 Commit refreshed UAT schema export"
+        id: commit_uat_export
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add schema-export/UAT
+
+          if git diff --cached --quiet -- schema-export/UAT; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No UAT schema export changes needed after deployment."
+          else
+            git commit -m "chore(schema): refresh UAT export after promotion"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "🔍 Compare Dev export with UAT export"
+        id: compare_dev_uat
+        run: |
+          set -euo pipefail
+
+          mkdir -p workflow-reports
+          report_file="workflow-reports/dev-vs-uat.md"
+
+          set +e
+          python scripts/drift_detector.py \
+            --git-schema-dir "schema-export/Dev" \
+            --live-schema-dir "schema-export/UAT" \
+            --format markdown \
+            --no-color \
+            > "${report_file}"
+          exit_code=$?
+          set -e
+
+          if [[ "${exit_code}" -gt 1 ]]; then
+            echo "::error::The Dev vs UAT comparison failed unexpectedly with exit code ${exit_code}."
+            exit "${exit_code}"
+          fi
+
+          echo "report_file=${report_file}" >> "$GITHUB_OUTPUT"
+          echo "drift_detected=$([[ "${exit_code}" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat "${report_file}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "🧾 Summarize UAT deployment"
+        if: always()
+        run: |
+          set -euo pipefail
+
+          {
+            echo
+            echo "## UAT deployment summary"
+            echo
+            echo "- Schema export committed: `${{ steps.commit_uat_export.outputs.changed }}`"
+            echo "- Drift comparison report: `${{ steps.compare_dev_uat.outputs.report_file }}`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-prod:
+    name: "🏁 Deploy schema to Prod"
+    needs: deploy-uat
+    if: github.event_name == 'workflow_dispatch' && inputs.target_environment == 'Prod'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+
+    steps:
+      - name: "🧾 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "📦 Install deployment dependencies"
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          python -m pip install pyodbc azure-identity
+
+      - name: "✅ Validate required Prod configuration"
+        run: |
+          set -euo pipefail
+
+          required_vars=(WORKSPACE_ID_PROD MIGRATION_NOTEBOOK_ID_PROD SQL_ENDPOINT_PROD LAKEHOUSE_DATABASE)
+          for var_name in "${required_vars[@]}"; do
+            if [[ -z "${!var_name:-}" ]]; then
+              echo "::error::Required configuration '${var_name}' is missing for the Prod deployment."
+              exit 1
+            fi
+          done
+
+      - name: "🔐 Sign in to Azure with OIDC"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "🎟️ Acquire Fabric API token"
+        id: fabric_token
+        run: |
+          set -euo pipefail
+
+          access_token=$(az account get-access-token --resource "https://api.fabric.microsoft.com" --query accessToken -o tsv)
+          if [[ -z "${access_token}" ]]; then
+            echo "::error::Failed to acquire a Fabric API access token."
+            exit 1
+          fi
+
+          echo "::add-mask::${access_token}"
+          echo "access_token=${access_token}" >> "$GITHUB_OUTPUT"
+
+      - name: "🚀 Trigger migration runner notebook in Prod"
+        id: run_migrations
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "target_environment": {
+                  "value": "Prod",
+                  "type": "string"
+                },
+                "migration_type": {
+                  "value": "sql",
+                  "type": "string"
+                },
+                "migrations_path": {
+                  "value": "/lakehouse/default/Files/migrations",
+                  "type": "string"
+                },
+                "dry_run": {
+                  "value": false,
+                  "type": "bool"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                },
+                "git_ref": {
+                  "value": "${GITHUB_REF_NAME}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID_PROD}/items/${MIGRATION_NOTEBOOK_ID_PROD}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}")
+
+          if [[ "${http_code}" != "202" ]]; then
+            echo "::error::Failed to start the Prod migration notebook (HTTP ${http_code})."
+            cat "${body_file}"
+            exit 1
+          fi
+
+          job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+          retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+
+          if [[ -z "${job_url}" ]]; then
+            echo "::error::Fabric API did not return a job location for the Prod deployment notebook."
+            exit 1
+          fi
+
+          echo "job_url=${job_url}" >> "$GITHUB_OUTPUT"
+          echo "poll_interval=${retry_after:-30}" >> "$GITHUB_OUTPUT"
+
+      - name: "⏳ Wait for Prod migration completion"
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric_token.outputs.access_token }}
+          JOB_URL: ${{ steps.run_migrations.outputs.job_url }}
+          POLL_INTERVAL: ${{ steps.run_migrations.outputs.poll_interval }}
+        run: |
+          set -euo pipefail
+
+          max_attempts=40
+          sleep_seconds="${POLL_INTERVAL:-30}"
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "${body_file}" -D "${headers_file}" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "${JOB_URL}")
+
+            if [[ "${http_code}" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "${headers_file}" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling the Prod deployment. Waiting ${retry_after}s before retrying."
+              sleep "${retry_after}"
+              continue
+            fi
+
+            if [[ "${http_code}" != "200" ]]; then
+              echo "::error::Unexpected response while polling the Prod deployment (HTTP ${http_code})."
+              cat "${body_file}"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "${body_file}")
+            echo "Attempt ${attempt}/${max_attempts}: Prod notebook status = ${job_status}"
+
+            case "${job_status}" in
+              Completed)
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::Prod deployment notebook ended with status '${job_status}'."
+                cat "${body_file}"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "${sleep_seconds}"
+                ;;
+              *)
+                echo "::warning::Unexpected Prod deployment status '${job_status}'. Continuing to poll."
+                sleep "${sleep_seconds}"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the Prod deployment to complete."
+          exit 1
+
+      - name: "📸 Refresh the Prod schema export"
+        run: |
+          set -euo pipefail
+
+          python scripts/schema_extractor.py \
+            --endpoint "${SQL_ENDPOINT_PROD}" \
+            --database "${LAKEHOUSE_DATABASE}" \
+            --output-dir "schema-export/Prod" \
+            --auth-method azure-cli \
+            --log-level INFO
+
+      - name: "📝 Commit refreshed Prod schema export"
+        id: commit_prod_export
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add schema-export/Prod
+
+          if git diff --cached --quiet -- schema-export/Prod; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No Prod schema export changes needed after deployment."
+          else
+            git commit -m "chore(schema): refresh Prod export after promotion"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "🔍 Compare Dev, UAT, and Prod exports"
+        id: final_compare
+        run: |
+          set -euo pipefail
+
+          mkdir -p workflow-reports
+          dev_uat_report="workflow-reports/dev-vs-uat.md"
+          uat_prod_report="workflow-reports/uat-vs-prod.md"
+          dev_prod_report="workflow-reports/dev-vs-prod.md"
+          combined_report="workflow-reports/all-environments-summary.md"
+
+          run_compare() {
+            local baseline_dir="$1"
+            local comparison_dir="$2"
+            local output_file="$3"
+
+            set +e
+            python scripts/drift_detector.py \
+              --git-schema-dir "${baseline_dir}" \
+              --live-schema-dir "${comparison_dir}" \
+              --format markdown \
+              --no-color \
+              > "${output_file}"
+            local exit_code=$?
+            set -e
+
+            if [[ "${exit_code}" -gt 1 ]]; then
+              echo "::error::Comparison ${baseline_dir} vs ${comparison_dir} failed unexpectedly with exit code ${exit_code}."
+              exit "${exit_code}"
+            fi
+          }
+
+          run_compare "schema-export/Dev" "schema-export/UAT" "${dev_uat_report}"
+          run_compare "schema-export/UAT" "schema-export/Prod" "${uat_prod_report}"
+          run_compare "schema-export/Dev" "schema-export/Prod" "${dev_prod_report}"
+
+          {
+            echo "# Final cross-environment drift summary"
+            echo
+            echo "## Dev vs UAT"
+            echo
+            cat "${dev_uat_report}"
+            echo
+            echo "## UAT vs Prod"
+            echo
+            cat "${uat_prod_report}"
+            echo
+            echo "## Dev vs Prod"
+            echo
+            cat "${dev_prod_report}"
+          } > "${combined_report}"
+
+          echo "combined_report=${combined_report}" >> "$GITHUB_OUTPUT"
+          cat "${combined_report}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "🧾 Summarize Prod deployment"
+        if: always()
+        run: |
+          set -euo pipefail
+
+          {
+            echo
+            echo "## Prod deployment summary"
+            echo
+            echo "- Schema export committed: `${{ steps.commit_prod_export.outputs.changed }}`"
+            echo "- Final comparison report: `${{ steps.final_compare.outputs.combined_report }}`"
+          } >> "$GITHUB_STEP_SUMMARY"

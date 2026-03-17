@@ -1,0 +1,628 @@
+# GitHub Environments named UAT and Production must be configured with protection rules
+# (for example, required reviewers) to enforce the manual approval gates for deployments.
+name: Deploy Lakehouse Schema Migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lakehouse-migrations/**'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  FABRIC_API_BASE: https://api.fabric.microsoft.com/v1
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Validate migration changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List changed migration files
+        id: changed-files
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manual run detected; listing all migration assets."
+            mapfile -t files < <(git ls-files lakehouse-migrations)
+          else
+            before_sha="${{ github.event.before }}"
+
+            if [[ -z "$before_sha" || "$before_sha" =~ ^0+$ ]]; then
+              echo "No valid 'before' SHA found; listing all migration assets."
+              mapfile -t files < <(git ls-files lakehouse-migrations)
+            else
+              mapfile -t files < <(git diff --name-only "$before_sha" "${{ github.sha }}" -- lakehouse-migrations)
+            fi
+          fi
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No migration files were detected in the change set."
+          else
+            printf ' - %s\n' "${files[@]}"
+          fi
+
+          {
+            echo 'files<<EOF'
+            printf '%s\n' "${files[@]}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run basic syntax validation
+        run: |
+          set -euo pipefail
+
+          changed_files="${{ steps.changed-files.outputs.files }}"
+
+          if [[ -z "$changed_files" ]]; then
+            echo "No migration files to validate."
+            exit 0
+          fi
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+
+            case "$file" in
+              *.sql)
+                echo "Validating SQL migration: $file"
+                if ! grep -Eq ';[[:space:]]*$' "$file"; then
+                  echo "::error file=$file::SQL migration does not appear to end with a semicolon."
+                  exit 1
+                fi
+                if ! grep -Eq 'CREATE|ALTER|INSERT|UPDATE|DELETE|MERGE|DROP|TRUNCATE' "$file"; then
+                  echo "::error file=$file::SQL migration does not contain a recognizable DDL or DML statement."
+                  exit 1
+                fi
+                ;;
+              *.py)
+                echo "Validating PySpark migration: $file"
+                python -m py_compile "$file"
+                ;;
+              *)
+                echo "Skipping non-executable migration asset: $file"
+                ;;
+            esac
+          done <<< "$changed_files"
+
+  deploy-uat:
+    name: Deploy schema to UAT
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: UAT
+    env:
+      FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+      FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+      FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      WORKSPACE_ID: ${{ secrets.UAT_WORKSPACE_ID }}
+      MIGRATION_NOTEBOOK_ID: ${{ secrets.UAT_MIGRATION_NOTEBOOK_ID }}
+      DQ_NOTEBOOK_ID: ${{ secrets.UAT_DQ_NOTEBOOK_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate required UAT secrets
+        run: |
+          set -euo pipefail
+
+          required_vars=(FABRIC_TENANT_ID FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET WORKSPACE_ID MIGRATION_NOTEBOOK_ID DQ_NOTEBOOK_ID)
+          for var_name in "${required_vars[@]}"; do
+            if [[ -z "${!var_name:-}" ]]; then
+              echo "::error::Required secret or environment variable '$var_name' is missing for the UAT deployment job."
+              exit 1
+            fi
+          done
+
+      - name: Get Azure AD access token
+        id: fabric-token
+        run: |
+          set -euo pipefail
+
+          response=$(curl -sS -X POST "https://login.microsoftonline.com/${FABRIC_TENANT_ID}/oauth2/v2.0/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=${FABRIC_CLIENT_ID}" \
+            --data-urlencode "client_secret=${FABRIC_CLIENT_SECRET}" \
+            --data-urlencode "scope=https://api.fabric.microsoft.com/.default" \
+            --data-urlencode "grant_type=client_credentials")
+
+          access_token=$(echo "$response" | jq -r '.access_token // empty')
+          if [[ -z "$access_token" ]]; then
+            echo "::error::Failed to acquire a Fabric access token."
+            echo "$response"
+            exit 1
+          fi
+
+          echo "::add-mask::$access_token"
+          echo "access_token=$access_token" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger migration_runner notebook in UAT workspace
+        id: run-migrations
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          # Parameter names must match the Fabric notebook parameter cell definition.
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "deployment_environment": {
+                  "value": "UAT",
+                  "type": "string"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                },
+                "git_ref": {
+                  "value": "${GITHUB_REF_NAME}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${MIGRATION_NOTEBOOK_ID}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+
+          if [[ "$http_code" != "202" ]]; then
+            echo "::error::Failed to start the UAT migration notebook (HTTP $http_code)."
+            cat "$body_file"
+            exit 1
+          fi
+
+          job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+
+          if [[ -z "$job_url" ]]; then
+            echo "::error::Fabric API did not return a job location for the UAT migration notebook."
+            exit 1
+          fi
+
+          echo "Migration job started: $job_url"
+          echo "job_url=$job_url" >> "$GITHUB_OUTPUT"
+          echo "poll_interval=${retry_after:-30}" >> "$GITHUB_OUTPUT"
+
+      - name: Poll UAT migration job completion
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+          JOB_URL: ${{ steps.run-migrations.outputs.job_url }}
+          POLL_INTERVAL: ${{ steps.run-migrations.outputs.poll_interval }}
+        run: |
+          set -euo pipefail
+
+          max_attempts=40
+          sleep_seconds="${POLL_INTERVAL:-30}"
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "$JOB_URL")
+
+            if [[ "$http_code" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling UAT migration job. Waiting ${retry_after}s before retrying."
+              sleep "$retry_after"
+              continue
+            fi
+
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::Unexpected response while polling the UAT migration job (HTTP $http_code)."
+              cat "$body_file"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "$body_file")
+            echo "Attempt ${attempt}/${max_attempts}: UAT migration job status = ${job_status}"
+
+            case "$job_status" in
+              Completed)
+                echo "UAT migration job completed successfully."
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::UAT migration job ended with status '${job_status}'."
+                cat "$body_file"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "$sleep_seconds"
+                ;;
+              *)
+                echo "::warning::Unexpected UAT migration job status '${job_status}'. Continuing to poll."
+                sleep "$sleep_seconds"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the UAT migration job to complete."
+          exit 1
+
+      - name: Run UAT data quality checks
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "deployment_environment": {
+                  "value": "UAT",
+                  "type": "string"
+                },
+                "validation_scope": {
+                  "value": "post_migration",
+                  "type": "string"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${DQ_NOTEBOOK_ID}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+
+          if [[ "$http_code" != "202" ]]; then
+            echo "::error::Failed to start the UAT data quality notebook (HTTP $http_code)."
+            cat "$body_file"
+            exit 1
+          fi
+
+          dq_job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          dq_retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          dq_retry_after="${dq_retry_after:-30}"
+
+          if [[ -z "$dq_job_url" ]]; then
+            echo "::error::Fabric API did not return a job location for the UAT data quality notebook."
+            exit 1
+          fi
+
+          max_attempts=30
+          for attempt in $(seq 1 "$max_attempts"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "$dq_job_url")
+
+            if [[ "$http_code" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling the UAT data quality job. Waiting ${retry_after}s before retrying."
+              sleep "$retry_after"
+              continue
+            fi
+
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::Unexpected response while polling the UAT data quality job (HTTP $http_code)."
+              cat "$body_file"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "$body_file")
+            echo "Attempt ${attempt}/${max_attempts}: UAT data quality job status = ${job_status}"
+
+            case "$job_status" in
+              Completed)
+                echo "UAT data quality checks completed successfully."
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::UAT data quality job ended with status '${job_status}'."
+                cat "$body_file"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "$dq_retry_after"
+                ;;
+              *)
+                echo "::warning::Unexpected UAT data quality job status '${job_status}'. Continuing to poll."
+                sleep "$dq_retry_after"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the UAT data quality checks to complete."
+          exit 1
+
+  deploy-prod:
+    name: Deploy schema to Production
+    needs: deploy-uat
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: Production
+    env:
+      FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+      FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+      FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+      WORKSPACE_ID: ${{ secrets.PROD_WORKSPACE_ID }}
+      MIGRATION_NOTEBOOK_ID: ${{ secrets.PROD_MIGRATION_NOTEBOOK_ID }}
+      DQ_NOTEBOOK_ID: ${{ secrets.PROD_DQ_NOTEBOOK_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate required Production secrets
+        run: |
+          set -euo pipefail
+
+          required_vars=(FABRIC_TENANT_ID FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET WORKSPACE_ID MIGRATION_NOTEBOOK_ID DQ_NOTEBOOK_ID)
+          for var_name in "${required_vars[@]}"; do
+            if [[ -z "${!var_name:-}" ]]; then
+              echo "::error::Required secret or environment variable '$var_name' is missing for the Production deployment job."
+              exit 1
+            fi
+          done
+
+      - name: Get Azure AD access token
+        id: fabric-token
+        run: |
+          set -euo pipefail
+
+          response=$(curl -sS -X POST "https://login.microsoftonline.com/${FABRIC_TENANT_ID}/oauth2/v2.0/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=${FABRIC_CLIENT_ID}" \
+            --data-urlencode "client_secret=${FABRIC_CLIENT_SECRET}" \
+            --data-urlencode "scope=https://api.fabric.microsoft.com/.default" \
+            --data-urlencode "grant_type=client_credentials")
+
+          access_token=$(echo "$response" | jq -r '.access_token // empty')
+          if [[ -z "$access_token" ]]; then
+            echo "::error::Failed to acquire a Fabric access token."
+            echo "$response"
+            exit 1
+          fi
+
+          echo "::add-mask::$access_token"
+          echo "access_token=$access_token" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger migration_runner notebook in Production workspace
+        id: run-migrations
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          # Parameter names must match the Fabric notebook parameter cell definition.
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "deployment_environment": {
+                  "value": "Production",
+                  "type": "string"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                },
+                "git_ref": {
+                  "value": "${GITHUB_REF_NAME}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${MIGRATION_NOTEBOOK_ID}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+
+          if [[ "$http_code" != "202" ]]; then
+            echo "::error::Failed to start the Production migration notebook (HTTP $http_code)."
+            cat "$body_file"
+            exit 1
+          fi
+
+          job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+
+          if [[ -z "$job_url" ]]; then
+            echo "::error::Fabric API did not return a job location for the Production migration notebook."
+            exit 1
+          fi
+
+          echo "Migration job started: $job_url"
+          echo "job_url=$job_url" >> "$GITHUB_OUTPUT"
+          echo "poll_interval=${retry_after:-30}" >> "$GITHUB_OUTPUT"
+
+      - name: Poll Production migration job completion
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+          JOB_URL: ${{ steps.run-migrations.outputs.job_url }}
+          POLL_INTERVAL: ${{ steps.run-migrations.outputs.poll_interval }}
+        run: |
+          set -euo pipefail
+
+          max_attempts=40
+          sleep_seconds="${POLL_INTERVAL:-30}"
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "$JOB_URL")
+
+            if [[ "$http_code" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling Production migration job. Waiting ${retry_after}s before retrying."
+              sleep "$retry_after"
+              continue
+            fi
+
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::Unexpected response while polling the Production migration job (HTTP $http_code)."
+              cat "$body_file"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "$body_file")
+            echo "Attempt ${attempt}/${max_attempts}: Production migration job status = ${job_status}"
+
+            case "$job_status" in
+              Completed)
+                echo "Production migration job completed successfully."
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::Production migration job ended with status '${job_status}'."
+                cat "$body_file"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "$sleep_seconds"
+                ;;
+              *)
+                echo "::warning::Unexpected Production migration job status '${job_status}'. Continuing to poll."
+                sleep "$sleep_seconds"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the Production migration job to complete."
+          exit 1
+
+      - name: Run Production data quality checks
+        env:
+          ACCESS_TOKEN: ${{ steps.fabric-token.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          payload=$(cat <<EOF
+          {
+            "executionData": {
+              "parameters": {
+                "deployment_environment": {
+                  "value": "Production",
+                  "type": "string"
+                },
+                "validation_scope": {
+                  "value": "post_migration",
+                  "type": "string"
+                },
+                "git_commit": {
+                  "value": "${GITHUB_SHA}",
+                  "type": "string"
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+            -X POST "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${DQ_NOTEBOOK_ID}/jobs/RunNotebook/instances" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+
+          if [[ "$http_code" != "202" ]]; then
+            echo "::error::Failed to start the Production data quality notebook (HTTP $http_code)."
+            cat "$body_file"
+            exit 1
+          fi
+
+          dq_job_url=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          dq_retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+          dq_retry_after="${dq_retry_after:-30}"
+
+          if [[ -z "$dq_job_url" ]]; then
+            echo "::error::Fabric API did not return a job location for the Production data quality notebook."
+            exit 1
+          fi
+
+          max_attempts=30
+          for attempt in $(seq 1 "$max_attempts"); do
+            headers_file=$(mktemp)
+            body_file=$(mktemp)
+            http_code=$(curl -sS -o "$body_file" -D "$headers_file" -w '%{http_code}' \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "$dq_job_url")
+
+            if [[ "$http_code" == "429" ]]; then
+              retry_after=$(awk 'BEGIN{IGNORECASE=1} /^Retry-After:/ {gsub(/\r/, "", $2); print $2}' "$headers_file" | tail -n 1)
+              retry_after="${retry_after:-60}"
+              echo "Rate limited while polling the Production data quality job. Waiting ${retry_after}s before retrying."
+              sleep "$retry_after"
+              continue
+            fi
+
+            if [[ "$http_code" != "200" ]]; then
+              echo "::error::Unexpected response while polling the Production data quality job (HTTP $http_code)."
+              cat "$body_file"
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status // "Unknown"' "$body_file")
+            echo "Attempt ${attempt}/${max_attempts}: Production data quality job status = ${job_status}"
+
+            case "$job_status" in
+              Completed)
+                echo "Production data quality checks completed successfully."
+                exit 0
+                ;;
+              Failed|Cancelled|Deduped)
+                echo "::error::Production data quality job ended with status '${job_status}'."
+                cat "$body_file"
+                exit 1
+                ;;
+              NotStarted|InProgress)
+                sleep "$dq_retry_after"
+                ;;
+              *)
+                echo "::warning::Unexpected Production data quality job status '${job_status}'. Continuing to poll."
+                sleep "$dq_retry_after"
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for the Production data quality checks to complete."
+          exit 1

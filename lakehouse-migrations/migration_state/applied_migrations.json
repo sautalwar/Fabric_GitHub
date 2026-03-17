@@ -1,0 +1,5 @@
+{
+    "applied": [],
+    "last_updated": null,
+    "note": "This file tracks initial state. In production, migration state is stored in a Delta table within each Lakehouse."
+}

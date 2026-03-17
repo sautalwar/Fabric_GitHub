@@ -1,0 +1,215 @@
+# This workflow captures the live Lakehouse SQL schema and stores it in Git so
+# Lakehouse tables, views, schemas, columns, and procedures become reviewable.
+#
+# Required repository secrets:
+#   - AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   - SQL_ENDPOINT_DEV, SQL_ENDPOINT_UAT, SQL_ENDPOINT_PROD
+#   - LAKEHOUSE_DATABASE
+#
+# What this workflow writes back to the repository:
+#   - schema-export/Dev/
+#   - schema-export/UAT/
+#   - schema-export/Prod/
+name: "📸 Schema Export — Capture Lakehouse Schema to Git"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Choose which Lakehouse environment to export."
+        required: true
+        type: choice
+        options:
+          - Dev
+          - UAT
+          - Prod
+  schedule:
+    - cron: "0 0 * * 0"
+
+env:
+  FABRIC_API_BASE: "https://api.fabric.microsoft.com/v1"
+  WORKSPACE_ID_DEV: ${{ vars.WORKSPACE_ID_DEV }}
+  WORKSPACE_ID_UAT: ${{ vars.WORKSPACE_ID_UAT }}
+  WORKSPACE_ID_PROD: ${{ vars.WORKSPACE_ID_PROD }}
+  # These secrets point at the SQL Analytics endpoints for each Lakehouse.
+  SQL_ENDPOINT_DEV: ${{ secrets.SQL_ENDPOINT_DEV }}
+  SQL_ENDPOINT_UAT: ${{ secrets.SQL_ENDPOINT_UAT }}
+  SQL_ENDPOINT_PROD: ${{ secrets.SQL_ENDPOINT_PROD }}
+  # This is the Lakehouse SQL database name used by the extractor.
+  LAKEHOUSE_DATABASE: ${{ secrets.LAKEHOUSE_DATABASE }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  export-schema:
+    name: "📤 Export ${{ matrix.environment_name }} Lakehouse schema"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment_name: Dev
+            environment_slug: dev
+            export_dir: schema-export/Dev
+          - environment_name: UAT
+            environment_slug: uat
+            export_dir: schema-export/UAT
+          - environment_name: Prod
+            environment_slug: prod
+            export_dir: schema-export/Prod
+    if: github.event_name != 'workflow_dispatch' || inputs.environment == matrix.environment_name
+
+    steps:
+      - name: "🧾 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "📦 Install extractor dependencies"
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          python -m pip install pyodbc azure-identity
+
+      - name: "🧭 Resolve target environment settings"
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.environment_name }}" in
+            Dev)
+              sql_endpoint="${SQL_ENDPOINT_DEV}"
+              ;;
+            UAT)
+              sql_endpoint="${SQL_ENDPOINT_UAT}"
+              ;;
+            Prod)
+              sql_endpoint="${SQL_ENDPOINT_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported environment '${{ matrix.environment_name }}'."
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${sql_endpoint}" ]]; then
+            echo "::error::The SQL endpoint secret for ${{ matrix.environment_name }} is missing."
+            exit 1
+          fi
+
+          if [[ -z "${LAKEHOUSE_DATABASE}" ]]; then
+            echo "::error::The LAKEHOUSE_DATABASE secret is missing."
+            exit 1
+          fi
+
+          {
+            echo "sql_endpoint=${sql_endpoint}"
+            echo "export_dir=${{ matrix.export_dir }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "🔐 Sign in to Azure with OIDC"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "📸 Run schema extractor"
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${{ steps.resolve.outputs.export_dir }}"
+
+          # The extractor connects to the live SQL endpoint and rewrites the
+          # environment-specific export directory with the latest DDL snapshot.
+          python scripts/schema_extractor.py \
+            --endpoint "${{ steps.resolve.outputs.sql_endpoint }}" \
+            --database "${LAKEHOUSE_DATABASE}" \
+            --output-dir "${{ steps.resolve.outputs.export_dir }}" \
+            --auth-method azure-cli \
+            --log-level INFO
+
+      - name: "🔍 Detect exported file changes"
+        id: detect_changes
+        run: |
+          set -euo pipefail
+
+          git add "${{ steps.resolve.outputs.export_dir }}"
+
+          if git diff --cached --quiet -- "${{ steps.resolve.outputs.export_dir }}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No schema changes were detected for ${{ matrix.environment_name }}."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Schema changes were detected for ${{ matrix.environment_name }}."
+            git status --short -- "${{ steps.resolve.outputs.export_dir }}"
+          fi
+
+      - name: "📝 Create or update schema export PR"
+        id: create_pr
+        if: steps.detect_changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          add-paths: |
+            ${{ steps.resolve.outputs.export_dir }}
+          branch: automation/schema-export-${{ matrix.environment_slug }}
+          delete-branch: true
+          commit-message: "chore(schema): export ${{ matrix.environment_name }} Lakehouse schema"
+          title: "chore(schema): export ${{ matrix.environment_name }} Lakehouse schema"
+          body: |
+            ## Why this PR exists
+
+            Microsoft Fabric Git integration does not track Lakehouse tables, views, schemas, columns, or stored procedures.
+            This workflow captures the live Lakehouse schema and stores it in Git so reviewers can see the exact DDL changes.
+
+            ## What changed
+
+            - Environment: `${{ matrix.environment_name }}`
+            - Export path: `${{ steps.resolve.outputs.export_dir }}`
+            - Triggered by: `${{ github.event_name }}`
+            - Workflow run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+
+            ## What to review
+
+            - Added, removed, or updated `.sql` files under `${{ steps.resolve.outputs.export_dir }}`
+            - `manifest.json` hash and object counts
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "🧾 Write job summary"
+        if: always()
+        run: |
+          set -euo pipefail
+
+          changes_detected="${{ steps.detect_changes.outputs.changed }}"
+          pr_url="${{ steps.create_pr.outputs.pull-request-url }}"
+
+          {
+            echo "# Schema export summary"
+            echo
+            echo "- Environment: `${{ matrix.environment_name }}`"
+            echo "- Export directory: `${{ steps.resolve.outputs.export_dir }}`"
+            echo "- Changes detected: `${changes_detected:-false}`"
+            if [[ "${changes_detected:-false}" == "true" ]]; then
+              if [[ -n "${pr_url}" ]]; then
+                echo "- Pull request: ${pr_url}"
+              else
+                echo "- Pull request: Created or updated by peter-evans/create-pull-request"
+              fi
+            else
+              echo "- Pull request: Not needed because no schema files changed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

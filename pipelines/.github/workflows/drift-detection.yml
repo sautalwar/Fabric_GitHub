@@ -1,0 +1,250 @@
+# This workflow checks whether the schema stored in Git still matches the live
+# Microsoft Fabric Lakehouse SQL endpoint.
+#
+# Required repository secrets:
+#   - AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   - SQL_ENDPOINT_DEV, SQL_ENDPOINT_UAT, SQL_ENDPOINT_PROD
+#   - LAKEHOUSE_DATABASE
+#
+# Required Git content in this repo:
+#   - schema-export/Dev/
+#   - schema-export/UAT/
+#   - schema-export/Prod/
+#   - scripts/drift_detector.py
+name: "🔍 Schema Drift Detection"
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  FABRIC_API_BASE: "https://api.fabric.microsoft.com/v1"
+  WORKSPACE_ID_DEV: ${{ vars.WORKSPACE_ID_DEV }}
+  WORKSPACE_ID_UAT: ${{ vars.WORKSPACE_ID_UAT }}
+  WORKSPACE_ID_PROD: ${{ vars.WORKSPACE_ID_PROD }}
+  # These secrets identify the live SQL endpoints that are checked for drift.
+  SQL_ENDPOINT_DEV: ${{ secrets.SQL_ENDPOINT_DEV }}
+  SQL_ENDPOINT_UAT: ${{ secrets.SQL_ENDPOINT_UAT }}
+  SQL_ENDPOINT_PROD: ${{ secrets.SQL_ENDPOINT_PROD }}
+  LAKEHOUSE_DATABASE: ${{ secrets.LAKEHOUSE_DATABASE }}
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  detect-drift:
+    name: "🔎 Check ${{ matrix.environment_name }} for schema drift"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment_name: Dev
+            environment_slug: dev
+            export_dir: schema-export/Dev
+          - environment_name: UAT
+            environment_slug: uat
+            export_dir: schema-export/UAT
+          - environment_name: Prod
+            environment_slug: prod
+            export_dir: schema-export/Prod
+
+    steps:
+      - name: "🧾 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "📦 Install drift detection dependencies"
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          python -m pip install pyodbc azure-identity
+
+      - name: "🧭 Resolve environment-specific settings"
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.environment_name }}" in
+            Dev)
+              sql_endpoint="${SQL_ENDPOINT_DEV}"
+              ;;
+            UAT)
+              sql_endpoint="${SQL_ENDPOINT_UAT}"
+              ;;
+            Prod)
+              sql_endpoint="${SQL_ENDPOINT_PROD}"
+              ;;
+            *)
+              echo "::error::Unsupported environment '${{ matrix.environment_name }}'."
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${sql_endpoint}" ]]; then
+            echo "::error::The SQL endpoint secret for ${{ matrix.environment_name }} is missing."
+            exit 1
+          fi
+
+          if [[ ! -f "${{ matrix.export_dir }}/manifest.json" ]]; then
+            echo "::error::Baseline export '${{ matrix.export_dir }}/manifest.json' does not exist in Git. Run the schema export workflow first."
+            exit 1
+          fi
+
+          if [[ -z "${LAKEHOUSE_DATABASE}" ]]; then
+            echo "::error::The LAKEHOUSE_DATABASE secret is missing."
+            exit 1
+          fi
+
+          {
+            echo "sql_endpoint=${sql_endpoint}"
+            echo "export_dir=${{ matrix.export_dir }}"
+            echo "issue_title=[Schema Drift][${{ matrix.environment_name }}] Lakehouse drift detected"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "🔐 Sign in to Azure with OIDC"
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "🔍 Run drift detector against the live Lakehouse"
+        id: drift_scan
+        run: |
+          set -euo pipefail
+
+          mkdir -p drift-reports
+          report_file="drift-reports/${{ matrix.environment_slug }}-schema-drift.md"
+
+          # We intentionally capture stdout to a markdown file so the same report
+          # can be used for the job summary and for a GitHub Issue when drift appears.
+          set +e
+          python scripts/drift_detector.py \
+            --git-schema-dir "${{ steps.resolve.outputs.export_dir }}" \
+            --endpoint "${{ steps.resolve.outputs.sql_endpoint }}" \
+            --database "${LAKEHOUSE_DATABASE}" \
+            --auth-method azure-cli \
+            --format markdown \
+            --fail-on-drift \
+            --no-color \
+            > "${report_file}"
+          exit_code=$?
+          set -e
+
+          echo "report_file=${report_file}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${exit_code}" -eq 0 ]]; then
+            echo "drift_detected=false" >> "$GITHUB_OUTPUT"
+            echo "No drift detected for ${{ matrix.environment_name }}."
+          elif [[ "${exit_code}" -eq 1 ]]; then
+            echo "drift_detected=true" >> "$GITHUB_OUTPUT"
+            echo "Drift detected for ${{ matrix.environment_name }}."
+          else
+            echo "::error::drift_detector.py failed unexpectedly with exit code ${exit_code}."
+            if [[ -f "${report_file}" ]]; then
+              cat "${report_file}"
+            fi
+            exit "${exit_code}"
+          fi
+
+      - name: "🧾 Publish drift report to the job summary"
+        if: always() && steps.drift_scan.outputs.report_file != ''
+        run: |
+          set -euo pipefail
+
+          cat "${{ steps.drift_scan.outputs.report_file }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "💬 Create or update drift issue"
+        if: always() && steps.drift_scan.outputs.report_file != ''
+        id: issue_management
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.drift_scan.outputs.report_file }}
+          DRIFT_DETECTED: ${{ steps.drift_scan.outputs.drift_detected }}
+          ISSUE_TITLE: ${{ steps.resolve.outputs.issue_title }}
+          ENVIRONMENT_NAME: ${{ matrix.environment_name }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const driftDetected = process.env.DRIFT_DETECTED === 'true';
+            const issueTitle = process.env.ISSUE_TITLE;
+            const environmentName = process.env.ENVIRONMENT_NAME;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const existingIssue = openIssues.find((issue) => !issue.pull_request && issue.title === issueTitle);
+
+            if (existingIssue) {
+              const updateMessage = driftDetected
+                ? `A new drift scan for **${environmentName}** still found differences.\n\nWorkflow run: ${runUrl}\n\n${report}`
+                : `A follow-up drift scan for **${environmentName}** found no current differences.\n\nWorkflow run: ${runUrl}\n\n${report}`;
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existingIssue.number,
+                body: updateMessage.slice(0, 65000),
+              });
+
+              core.setOutput('issue_action', 'commented');
+              core.setOutput('issue_url', existingIssue.html_url);
+            } else if (driftDetected) {
+              const createdIssue = await github.rest.issues.create({
+                owner,
+                repo,
+                title: issueTitle,
+                body: `Drift was detected for **${environmentName}**.\n\nWorkflow run: ${runUrl}\n\n${report}`.slice(0, 65000),
+              });
+
+              core.setOutput('issue_action', 'created');
+              core.setOutput('issue_url', createdIssue.data.html_url);
+            } else {
+              core.setOutput('issue_action', 'none');
+              core.setOutput('issue_url', '');
+            }
+
+      - name: "📌 Summarize issue handling"
+        if: always() && steps.drift_scan.outputs.report_file != ''
+        run: |
+          set -euo pipefail
+
+          issue_action="${{ steps.issue_management.outputs.issue_action }}"
+          issue_url="${{ steps.issue_management.outputs.issue_url }}"
+
+          {
+            echo
+            echo "## Issue handling"
+            echo
+            echo "- Drift detected: `${{ steps.drift_scan.outputs.drift_detected }}`"
+            echo "- Issue action: `${issue_action:-none}`"
+            if [[ -n "${issue_url}" ]]; then
+              echo "- Issue link: ${issue_url}"
+            else
+              echo "- Issue link: No issue update was needed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
